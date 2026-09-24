@@ -1,0 +1,31 @@
+<idea-plugin>
+    <id>online.raketa.routeindex</id>
+    <name>Raketa Route Index</name>
+    <vendor>Raketa</vendor>
+    <description><![CDATA[
+    Finds the controller or handler for a URL across every app of the Raketa monorepo
+    (Symfony <code>app/raketa/api</code>, Slim services in <code>api/*</code>, legacy entry points).
+    Ctrl+click on a URL in a behat <code>.feature</code> step opens its controller.
+    Paste a URL such as <code>https://raketa.in/api/profiles/645701/remarks</code> into Search Everywhere.
+    Routes are dumped by <em>Tools → Rebuild Raketa Route Index</em> into the gitignored
+    <code>.idea/raketa-routes.json</code>.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <searchEverywhereContributor implementation="online.raketa.routeindex.RouteSearchContributor$Factory"/>
+        <gotoDeclarationHandler implementation="online.raketa.routeindex.FeatureUrlGotoDeclarationHandler"/>
+        <notificationGroup id="Raketa Routes" displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="RaketaRoutes.Refresh"
+                class="online.raketa.routeindex.RefreshRoutesAction"
+                text="Rebuild Raketa Route Index"
+                description="Dump routes of every Raketa app into .idea/raketa-routes.json"
+                icon="AllIcons.Actions.Refresh">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
