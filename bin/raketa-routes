@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Terminal twin of the plugin.
 #   raketa-routes dump [raketa-dir]         rebuild <raketa-dir>/.idea/raketa-routes.json
-#   raketa-routes find <url|text> [raketa-dir]  print matching routes, best first
+#   raketa-routes find <url|command|text> [raketa-dir]  print matching routes and console commands, best first
 # raketa-dir defaults to the current git root. Container: $RAKETA_PHP_CONTAINER (raketa-php).
 set -euo pipefail
 
@@ -17,10 +17,10 @@ case "$cmd" in
         mkdir -p "$root/.idea"
         docker exec -i "$CONTAINER" php -d xdebug.mode=off -- < "$DUMPER" > "$out.tmp"
         mv "$out.tmp" "$out"
-        python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(len(d['routes']),'routes',d['apps'])" "$out"
+        python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(len(d['routes']),'routes',d['apps']);print(len(d.get('commands',[])),'commands',d.get('consoles'))" "$out"
         ;;
     find)
-        query="${1:?usage: raketa-routes find <url|text> [raketa-dir]}"
+        query="${1:?usage: raketa-routes find <url|command|text> [raketa-dir]}"
         root="$(realpath "${2:-$(git rev-parse --show-toplevel)}")"
         python3 "$HERE/bin/find_routes.py" "$root/.idea/raketa-routes.json" "$query"
         ;;

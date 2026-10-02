@@ -14,18 +14,34 @@ import com.intellij.psi.util.PsiTreeUtil
 import java.nio.file.Path
 
 /**
- * Ctrl+click on a URL in a behat step jumps to its controller. Only the URL itself is a link, so
- * a click on the rest of the step still goes to the step definition (Behat plugin).
+ * Ctrl+click on a URL in a behat step jumps to its controller, on a stubbed console command — to
+ * the command class. Only the URL or the command name is a link, so a click on the rest of the step
+ * still goes to the step definition (Behat plugin).
  */
 class FeatureUrlGotoDeclarationHandler : GotoDeclarationHandler {
     override fun getGotoDeclarationTargets(sourceElement: PsiElement?, offset: Int, editor: Editor): Array<PsiElement>? {
         val file = sourceElement?.containingFile?.virtualFile ?: return null
         if (file.extension != "feature") return null
         val project = editor.project ?: return null
+        val index = RouteIndex.getInstance(project)
+        commandAt(editor, offset)?.let { hit ->
+            return index.resolveCommand(hit.name)
+                .mapNotNull { target(project, it.file, it.line) }
+                .distinct().toTypedArray().ifEmpty { null }
+        }
         val hit = hitAt(project, editor, offset, file.path) ?: return null
 
-        val routes = RouteIndex.getInstance(project).resolve(hit.app, hit.method, FeatureStepUrl.queryUrl(hit.url))
-        return routes.mapNotNull { target(project, it) }.distinct().toTypedArray().ifEmpty { null }
+        val routes = index.resolve(hit.app, hit.method, FeatureStepUrl.queryUrl(hit.url))
+        return routes.mapNotNull { target(project, it.file, it.line) }.distinct().toTypedArray().ifEmpty { null }
+    }
+
+    private fun commandAt(editor: Editor, offset: Int): FeatureStepCommand.Hit? {
+        val document = editor.document
+        if (offset > document.textLength) return null
+        val lineIndex = document.getLineNumber(offset)
+        val start = document.getLineStartOffset(lineIndex)
+        val line = document.getText(TextRange(start, document.getLineEndOffset(lineIndex)))
+        return FeatureStepCommand.find(line, offset - start)
     }
 
     private fun hitAt(project: Project, editor: Editor, offset: Int, path: String): FeatureStepUrl.Hit? {
@@ -39,14 +55,14 @@ class FeatureUrlGotoDeclarationHandler : GotoDeclarationHandler {
     }
 
     companion object {
-        /** The method (or class) declared on the route's line, so the chooser popup shows its name. */
-        fun target(project: Project, route: Route): PsiElement? {
+        /** The method (or class) declared on the [line] of [relative], so the chooser popup shows its name. */
+        fun target(project: Project, relative: String?, line: Int): PsiElement? {
             val base = project.basePath ?: return null
-            val relative = route.file ?: return null
+            if (relative == null) return null
             val vFile = LocalFileSystem.getInstance().findFileByNioFile(Path.of(base, relative)) ?: return null
             val psiFile = PsiManager.getInstance(project).findFile(vFile) ?: return null
             val document = PsiDocumentManager.getInstance(project).getDocument(psiFile) ?: return psiFile
-            val lineIndex = (route.line - 1).coerceIn(0, maxOf(document.lineCount - 1, 0))
+            val lineIndex = (line - 1).coerceIn(0, maxOf(document.lineCount - 1, 0))
             val range = TextRange(document.getLineStartOffset(lineIndex), document.getLineEndOffset(lineIndex))
             val text = document.getText(range)
             val leaf = psiFile.findElementAt(range.startOffset + (text.length - text.trimStart().length)) ?: return psiFile

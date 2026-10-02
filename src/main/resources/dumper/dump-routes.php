@@ -1,20 +1,23 @@
 <?php
 
 /**
- * Raketa route dumper.
+ * Raketa route dumper: HTTP routes of every app and console commands of every console.
  *
  * Runs inside the php container, fed through stdin so nothing is written into the working tree:
  *   docker exec -i raketa-php php -d xdebug.mode=off -- --pretty < dump-routes.php > .idea/raketa-routes.json
  *
  * Every app is booted in its own php process (they have separate autoloaders and clashing
- * classes); each child prints its routes after a marker line. Warnings go to stderr, the JSON
- * index to stdout.
+ * classes); each child prints its routes after a marker line. Consoles are run as is with
+ * `list --format=json`, see rr_console_prelude_source(). Warnings go to stderr, the JSON index to stdout.
  */
 
 declare(strict_types=1);
 
 const RR_WEB = '/web';
 const RR_TIMEOUT = 120;
+const RR_MARKER = '@@RAKETA_ROUTES@@';
+/** Env a console needs only to list its commands: MAILER_DSN is set on stage/prod only. */
+const RR_CONSOLE_ENV = ['api/transfer/bin/console' => ['MAILER_DSN' => 'null://null']];
 
 $pretty = in_array('--pretty', $argv, true);
 $only = null;
@@ -82,30 +85,14 @@ foreach ($apps as $id => [$hosts, $boot]) {
     }
     $script = "$tmpDir/$id.php";
     file_put_contents($script, "<?php\n" . $helpers . "\n" . $boot . "\n");
-    $out = "$tmpDir/$id.out";
-    $err = "$tmpDir/$id.err";
-    $cmd = [PHP_BINARY, '-d', 'xdebug.mode=off', '-d', 'memory_limit=2G', '-d', 'display_errors=stderr', $script];
-    $proc = proc_open($cmd, [0 => ['file', '/dev/null', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $err, 'w']], $pipes, $tmpDir); // cwd: apps drop logs (queries_num.log, api_avia/) into it
-    $procs[$id] = [$proc, $hosts, $out, $err, microtime(true)];
+    $procs[$id] = rr_start($tmpDir, $id, [$script]);
 }
 
 $routes = [];
 $apps_stats = [];
-foreach ($procs as $id => [$proc, $hosts, $out, $err, $started]) {
-    while (proc_get_status($proc)['running']) {
-        if (microtime(true) - $started > RR_TIMEOUT) {
-            proc_terminate($proc, 9);
-            rr_warn("[$id] timeout after " . RR_TIMEOUT . "s\n");
-            break;
-        }
-        usleep(50_000);
-    }
-    proc_close($proc);
-    $stdout = (string) @file_get_contents($out);
-    $stderr = trim((string) @file_get_contents($err));
-    $pos = strrpos($stdout, "@@RAKETA_ROUTES@@");
-    $appRoutes = $pos === false ? null : json_decode(trim(substr($stdout, $pos + 17)), true);
-    if (!is_array($appRoutes)) {
+foreach (rr_finish($procs) as $id => [$stdout, $stderr]) {
+    $appRoutes = rr_after_marker($stdout);
+    if ($appRoutes === null) {
         rr_warn("[$id] failed: " . rr_tail($stderr !== '' ? $stderr : $stdout) . "\n");
         $apps_stats[$id] = 0;
         continue;
@@ -113,11 +100,44 @@ foreach ($procs as $id => [$proc, $hosts, $out, $err, $started]) {
     foreach ($appRoutes as $r) {
         $r['app'] = $id;
         $r['requirements'] = (object) ($r['requirements'] ?? []); // json_decode(assoc) turned {} into []
-        $r['hosts'] = array_values(array_unique(array_merge($r['hosts'] ?? [], $hosts)));
+        $r['hosts'] = array_values(array_unique(array_merge($r['hosts'] ?? [], $apps[$id][0])));
         $routes[] = $r;
     }
     $apps_stats[$id] = count($appRoutes);
 }
+
+// Console commands: every console entry point runs its own `list --format=json`, a prepended
+// script maps the listed names to the command classes loaded by then. After the routes, so the
+// raketa kernel isn't compiled into the same di-cache by two processes at once.
+$prelude = "$tmpDir/console-prelude.php";
+file_put_contents($prelude, rr_console_prelude_source());
+$procs = [];
+foreach (rr_console_entries() as $entry => $id) {
+    if ($only !== null && !in_array($id, $only, true)) {
+        continue;
+    }
+    $procs[$entry] = rr_start($tmpDir, str_replace('/', '_', $entry), ['-d', "auto_prepend_file=$prelude", RR_WEB . "/$entry", 'list', '--format=json'], RR_CONSOLE_ENV[$entry] ?? []);
+}
+$commands = [];
+$entries_stats = [];
+foreach (rr_finish($procs) as $entry => [$stdout, $stderr]) {
+    $entryCommands = rr_console_commands($stdout);
+    if ($entryCommands === null) {
+        rr_warn("[$entry] failed: " . rr_tail($stderr !== '' ? $stderr : $stdout) . "\n");
+        $entries_stats[$entry] = 0;
+        continue;
+    }
+    // core and raketa consoles share their commands, profile-sync and hotels repeat theirs in
+    // every cli script: one record per command, with every entry point that runs it.
+    foreach ($entryCommands as $c) {
+        $key = $c['name'] . '|' . $c['handler'];
+        $commands[$key] ??= ['apps' => [], 'entries' => []] + $c;
+        $commands[$key]['apps'] = array_values(array_unique([...$commands[$key]['apps'], rr_console_entries()[$entry]]));
+        $commands[$key]['entries'][] = $entry;
+    }
+    $entries_stats[$entry] = count($entryCommands);
+}
+$commands = array_values($commands);
 
 foreach ([['fcc', ['fcc.raketa.in']], ['planeta', ['planeta.raketa.in']]] as [$id, $hosts]) {
     if ($only !== null && !in_array($id, $only, true)) {
@@ -136,7 +156,7 @@ if ($only === null || in_array('static', $only, true)) {
 exec("rm -rf " . escapeshellarg($tmpDir));
 
 echo json_encode(
-    ['version' => 1, 'generatedAt' => date('c'), 'apps' => $apps_stats, 'routes' => $routes],
+    ['version' => 2, 'generatedAt' => date('c'), 'apps' => $apps_stats, 'consoles' => $entries_stats, 'routes' => $routes, 'commands' => $commands],
     JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | ($pretty ? JSON_PRETTY_PRINT : 0),
 ), "\n";
 
@@ -146,6 +166,43 @@ function rr_warn(string $message): void
     static $err = null;
     $err ??= fopen('php://stderr', 'w');
     fwrite($err, $message);
+}
+
+/** Starts `php <args>` in the background with cwd in $tmpDir: apps drop logs (queries_num.log, api_avia/) into it. */
+function rr_start(string $tmpDir, string $name, array $args, array $env = []): array
+{
+    $out = "$tmpDir/$name.out";
+    $err = "$tmpDir/$name.err";
+    $cmd = [PHP_BINARY, '-d', 'xdebug.mode=off', '-d', 'memory_limit=2G', '-d', 'display_errors=stderr', ...$args];
+    $proc = proc_open($cmd, [0 => ['file', '/dev/null', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $err, 'w']], $pipes, $tmpDir, $env === [] ? null : getenv() + $env);
+    return [$proc, $out, $err, microtime(true)];
+}
+
+/** @return array<string, array{0: string, 1: string}> stdout and stderr of every process */
+function rr_finish(array $procs): array
+{
+    $result = [];
+    foreach ($procs as $id => [$proc, $out, $err, $started]) {
+        while (proc_get_status($proc)['running']) {
+            if (microtime(true) - $started > RR_TIMEOUT) {
+                proc_terminate($proc, 9);
+                rr_warn("[$id] timeout after " . RR_TIMEOUT . "s\n");
+                break;
+            }
+            usleep(50_000);
+        }
+        proc_close($proc);
+        $result[$id] = [(string) @file_get_contents($out), trim((string) @file_get_contents($err))];
+    }
+    return $result;
+}
+
+/** Children may print while booting; their JSON follows the last marker line. */
+function rr_after_marker(string $stdout): ?array
+{
+    $pos = strrpos($stdout, RR_MARKER);
+    $data = $pos === false ? null : json_decode(trim(substr($stdout, $pos + strlen(RR_MARKER))), true);
+    return is_array($data) ? $data : null;
 }
 
 function rr_tail(string $text): string
@@ -215,6 +272,154 @@ function rr_route(string $app, array $hosts, array $methods, string $path, strin
         'line' => 1,
         'name' => null,
     ];
+}
+
+/**
+ * Console entry points: `core/bin/console`, `app/raketa/api/bin/console` and the extension-less
+ * php scripts in `api/<service>/{bin,cli}` that build a console application. Not `warmup-cache`
+ * (it warms up as soon as it starts) and not the service-framework template.
+ *
+ * @return array<string, string> entry path relative to the repo => app id
+ */
+function rr_console_entries(): array
+{
+    static $entries = null;
+    if ($entries !== null) {
+        return $entries;
+    }
+    $entries = [];
+    $files = array_merge(
+        glob(RR_WEB . '/core/bin/console') ?: [],
+        glob(RR_WEB . '/app/*/api/bin/console') ?: [],
+        glob(RR_WEB . '/api/*/bin/*') ?: [],
+        glob(RR_WEB . '/api/*/cli/*') ?: [],
+    );
+    foreach ($files as $file) {
+        $entry = substr($file, strlen(RR_WEB) + 1);
+        $name = basename($file);
+        if (!is_file($file) || str_contains($name, '.') || $name === 'warmup-cache' || str_starts_with($entry, 'api/service-framework/')) {
+            continue;
+        }
+        $source = (string) file_get_contents($file);
+        if (!str_starts_with($source, '#!') || !preg_match('/buildCommandApp|commandApp\(|makeCommandApp|new Application\(/i', $source)) {
+            continue;
+        }
+        $entries[$entry] = match (true) {
+            $entry === 'core/bin/console' => 'core',
+            str_starts_with($entry, 'app/') => explode('/', $entry)[1],
+            str_starts_with($entry, 'api/static/') => 'static-api',
+            default => explode('/', $entry)[1],
+        };
+    }
+    return $entries;
+}
+
+/**
+ * Prepended (auto_prepend_file) to a console entry run as `list --format=json`. Symfony writes
+ * straight to php://stdout, past any output buffer, so on shutdown the prelude only adds the
+ * command classes loaded by then (`list` instantiates even lazy commands) after the marker;
+ * rr_console_commands() matches them with the listed names.
+ */
+function rr_console_prelude_source(): string
+{
+    return <<<'PHP'
+        <?php
+        register_shutdown_function(static function (): void {
+            $base = Symfony\Component\Console\Command\Command::class;
+            $attribute = Symfony\Component\Console\Attribute\AsCommand::class;
+            $rel = static function (string|false $file): ?string {
+                $real = $file === false ? null : (realpath($file) ?: $file);
+                return $real !== null && str_starts_with($real, '/web/') ? substr($real, 5) : $real;
+            };
+            $classes = [];
+            foreach (get_declared_classes() as $class) {
+                $rc = new ReflectionClass($class);
+                $attributes = class_exists($attribute, false) ? $rc->getAttributes($attribute) : [];
+                // Invokable commands (Symfony 7.3+) don't extend Command, the attribute marks them.
+                if ($rc->isAbstract() || $class === Symfony\Component\Console\Command\LazyCommand::class || (!$attributes && !$rc->isSubclassOf($base))) {
+                    continue;
+                }
+                $names = [];
+                foreach ($attributes as $a) {
+                    $names = array_merge($names, explode('|', (string) $a->newInstance()->name));
+                }
+                if (!$names && method_exists($class, 'getDefaultName')) {
+                    try {
+                        $names[] = (string) @$class::getDefaultName();
+                    } catch (Throwable) {
+                    }
+                }
+                // __invoke()/execute() of the class itself, else the class line.
+                [$handler, $file, $line] = [$class, $rel($rc->getFileName()), (int) $rc->getStartLine()];
+                foreach (['__invoke', 'execute'] as $method) {
+                    if ($rc->hasMethod($method) && $rc->getMethod($method)->getDeclaringClass()->getName() === $class) {
+                        $rm = $rc->getMethod($method);
+                        [$handler, $file, $line] = ["$class::$method", $rel($rm->getFileName()), (int) $rm->getStartLine()];
+                        break;
+                    }
+                }
+                $classes[] = ['names' => array_values(array_filter($names, 'strlen')), 'handler' => $handler, 'file' => $file, 'line' => $line];
+            }
+            echo "\n@@RAKETA_ROUTES@@", json_encode($classes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), "\n";
+        });
+        PHP;
+}
+
+/**
+ * Names from the `list --format=json` output, each with its class: by #[AsCommand] /
+ * $defaultName, else the class whose file has the name quoted — names set in configure() or
+ * the constructor.
+ */
+function rr_console_commands(string $stdout): ?array
+{
+    $classes = rr_after_marker($stdout);
+    $pos = strrpos($stdout, RR_MARKER);
+    $listed = $pos !== false && preg_match('/\{"(?:application|commands)"/', $stdout, $m, PREG_OFFSET_CAPTURE)
+        ? json_decode(substr($stdout, $m[0][1], $pos - $m[0][1]), true)
+        : null;
+    if ($classes === null || !is_array($listed['commands'] ?? null)) {
+        return null;
+    }
+    $byName = [];
+    $unnamed = [];
+    foreach ($classes as $class) {
+        foreach ($class['names'] as $name) {
+            $byName[$name] ??= $class;
+        }
+        if ($class['names'] === [] && $class['file'] !== null) {
+            $unnamed[] = $class + ['source' => (string) @file_get_contents(RR_WEB . '/' . $class['file'])];
+        }
+    }
+    $commands = [];
+    foreach ($listed['commands'] as $c) {
+        $name = $c['name'];
+        if (in_array($name, ['_complete', 'completion', 'help', 'list'], true)) {
+            continue;
+        }
+        $class = $byName[$name] ?? null;
+        foreach ($c['aliases'] ?? [] as $alias) {
+            $class ??= $byName[$alias] ?? null;
+        }
+        if ($class === null) {
+            $quoted = '/[\'"]' . preg_quote($name, '/') . '[\'"]/';
+            foreach ($unnamed as $candidate) {
+                if (preg_match($quoted, $candidate['source'])) {
+                    $class = $candidate;
+                    break;
+                }
+            }
+        }
+        $commands[] = [
+            'name' => $name,
+            'aliases' => array_values($c['aliases'] ?? []),
+            'description' => (string) ($c['description'] ?? ''),
+            'hidden' => (bool) ($c['hidden'] ?? false),
+            'handler' => $class['handler'] ?? null,
+            'file' => $class['file'] ?? null,
+            'line' => $class['line'] ?? 0,
+        ];
+    }
+    return $commands;
 }
 
 /**

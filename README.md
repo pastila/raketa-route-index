@@ -6,6 +6,11 @@
 `agency.raketa.in/v2/services/42` или просто `RemarkController`, Enter — открывается метод.
 Результаты есть и во вкладке **All**, и в отдельной вкладке **Routes**.
 
+Там же ищутся **консольные команды** всех консолей: `bus:translate-stations`, строка из крона целиком
+(`php api/hotels/cli/sabre sync:api:service --id=1` — путь скрипта выбирает между одноимёнными
+командами разных скриптов), кусок имени, класса или описания (`автобусные станции`). Enter открывает
+`execute()`/`__invoke()` класса команды.
+
 ## Ctrl+клик в `.feature`
 
 Ссылкой становится только сам URL в шаге, клик по остальному тексту шага по-прежнему ведёт к
@@ -16,7 +21,8 @@
   `Mobile`…), иначе по пути файла (`api/<service>/features` → сервис, `core` → raketa);
 - `АПИ Авиа на curl-запрос GET /admin/...` — заглушка нашего сервиса, приложение по имени
   (`HostToServiceNameMapFactory`); внешние поставщики (`Поставщик АПИ …`, `avia.supplier.ru`) не ссылки;
-- `Функциональность: GET /api/...` — приложение из первого шага ответа файла.
+- `Функциональность: GET /api/...` — приложение из первого шага ответа файла;
+- `Дано команда "aeroexpress:booking --serviceId=1" вернёт код 0 …` — ссылка на имени команды, ведёт в её класс.
 
 `~lastServiceId~`, `<owner_type>` (Структура сценария) и `{profileId}` совпадают с любым сегментом.
 На полном прогоне по всем feature-файлам репозитория находится обработчик для 99,7% URL; остаток —
@@ -38,6 +44,16 @@
 | fcc, planeta | `<name>.*` | файловые: `public/**/*.php` без `*.inc.php`, `dir/index.php` → `dir/` |
 | static | `/static/` | правила `static.conf` + файлы `app/static/public` |
 
+Консольные команды. Консоли — `core/bin/console`, `app/raketa/api/bin/console` и php-скрипты без
+расширения в `api/<service>/{bin,cli}`, которые собирают консольное приложение (кроме `warmup-cache` и
+шаблона `service-framework`; `api/avia/cli/*.php` — обычные скрипты, они находятся через Go to File).
+Каждая запускается как есть с `list --format=json` и `auto_prepend_file`: на shutdown пролог отдаёт
+загруженные к этому моменту классы команд (`list` создаёт и lazy-команды), имя сопоставляется с классом
+по `#[AsCommand]`/`$defaultName`, иначе по имени в кавычках в файле класса (`configure()`, конструктор).
+Одинаковые команды разных консолей (core и raketa, все `profile-sync/cli`) хранятся одной записью со
+списком `entries`. Без класса остаются только `make:*` maker-bundle в transfer. `api/static/cli/run`
+локально не стартует, пока в его vendor нет `elasticsearch/elasticsearch` (`composer install` в `api/static`).
+
 Хост в запросе поднимает маршруты своего приложения (совпадение по первой метке — стейдж тоже),
 метод (`POST …`) — нужный action, `/ru`, `/en` и хвостовой `index.php` отбрасываются, путь без
 префикса (`profiles/1/remarks`) ищется как хвост маршрута.
@@ -45,7 +61,7 @@
 ## Обновление индекса
 
 - IDE: **Tools → Rebuild Raketa Route Index** (или Enter на подсказке «Индекс не собран» в Shift+Shift).
-- Терминал: `bin/raketa-routes dump ~/Projects/raketa`; поиск без IDE — `bin/raketa-routes find <url>`.
+- Терминал: `bin/raketa-routes dump ~/Projects/raketa`; поиск без IDE — `bin/raketa-routes find <url|команда>`.
 - Контейнер — `raketa-php`, переопределяется `RAKETA_PHP_CONTAINER` или `-Draketa.routes.container`.
 
 ## Сборка

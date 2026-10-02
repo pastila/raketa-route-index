@@ -1,4 +1,5 @@
-"""URL → handler lookup over .idea/raketa-routes.json; a port of RouteMatcher.kt for the terminal."""
+"""URL or console command → handler lookup over .idea/raketa-routes.json; a port of RouteMatcher.kt
+and CommandMatcher.kt for the terminal."""
 import json
 import re
 import sys
@@ -122,16 +123,46 @@ def match(c, method, host, segs, text):
     return None
 
 
+def entry_bonus(c, tokens):
+    paths = [t.removeprefix("/web/").removeprefix("./").lstrip("./") for t in tokens if "/" in t and not t.startswith("--")]
+    paths = [p for p in paths if p]
+    if not paths:
+        return 0
+    hit = any(e == p or e.endswith("/" + p) or p.endswith("/" + e) for p in paths for e in c["entries"])
+    return 100 if hit else -50
+
+
+def match_command(c, query):
+    tokens = [t.strip("\"'") for t in query.split()]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return None
+    names = [c["name"].lower()] + [a.lower() for a in c["aliases"]]
+    if any(t.lower() in names for t in tokens):
+        return 1000 + entry_bonus(c, tokens)
+    text = " ".join([c["name"], c["handler"] or "", c["description"]] + c["aliases"] + c["entries"]).lower()
+    words = [t.lower() for t in tokens]
+    if not all(w in text for w in words):
+        return None
+    return 300 + (20 if c["name"].lower().startswith(words[0]) else 0) - (10 if c["hidden"] else 0)
+
+
 def main():
     path, query = sys.argv[1], sys.argv[2]
-    routes = [Compiled(r) for r in json.load(open(path))["routes"]]
+    index = json.load(open(path))
+    routes = [Compiled(r) for r in index["routes"]]
     q = parse(query)
-    found = sorted(((s, c.r) for c in routes if (s := match(c, *q)) is not None), key=lambda x: -x[0])
-    for score, r in found[:20]:
-        methods = "|".join(r["methods"]) or "ANY"
-        print(f"{score:5} {methods:6} {r['path']}  [{r['app']}]\n      {r['handler']}  {r['file']}:{r['line']}")
+    found = [(s, "route", c.r) for c in routes if (s := match(c, *q)) is not None]
+    found += [(s, "command", c) for c in index.get("commands", []) if (s := match_command(c, query)) is not None]
+    found.sort(key=lambda x: -x[0])
+    for score, kind, r in found[:20]:
+        if kind == "route":
+            methods = "|".join(r["methods"]) or "ANY"
+            print(f"{score:5} {methods:6} {r['path']}  [{r['app']}]\n      {r['handler']}  {r['file']}:{r['line']}")
+        else:
+            print(f"{score:5} CLI    {r['name']}  [{', '.join(r['entries'])}]\n      {r['handler']}  {r['file']}:{r['line']}")
     if not found:
-        print("no routes", file=sys.stderr)
+        print("nothing found", file=sys.stderr)
         sys.exit(1)
 
 

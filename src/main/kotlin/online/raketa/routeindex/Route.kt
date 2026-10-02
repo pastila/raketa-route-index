@@ -21,3 +21,22 @@ data class Route(
 data class RouteMatch(val route: CompiledRoute, val score: Int, val kind: Kind) {
     enum class Kind { URL, URL_SUFFIX, TEXT }
 }
+
+/**
+ * A console command from `.idea/raketa-routes.json`. One record per command class: the same command
+ * may be served by several [entries] (`core/bin/console` and `app/raketa/api/bin/console`, every
+ * script in `api/profile-sync/cli`). [handler] and [file] are null when the class wasn't found (maker-bundle).
+ */
+data class ConsoleCommand(
+    val name: String,
+    val aliases: List<String>,
+    val description: String,
+    val hidden: Boolean,
+    val handler: String?,
+    val file: String?,
+    val line: Int,
+    val apps: List<String>,
+    val entries: List<String>,
+)
+
+data class CommandMatch(val command: ConsoleCommand, val score: Int, val exact: Boolean)

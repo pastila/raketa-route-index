@@ -79,6 +79,7 @@ class RefreshRoutesAction : AnAction() {
                 append("Маршрутов: ${snapshot.routes.size}")
                 val byApp = snapshot.routes.groupingBy { it.route.app }.eachCount()
                 append(" (").append(byApp.entries.joinToString(", ") { "${it.key}: ${it.value}" }).append(")")
+                append("\nКонсольных команд: ${snapshot.commands.size}")
                 if (warnings.isNotEmpty()) append("\n").append(warnings.take(10).joinToString("\n"))
             }
             return msg to true

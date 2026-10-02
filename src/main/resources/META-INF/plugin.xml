@@ -5,7 +5,9 @@
     <description><![CDATA[
     Finds the controller or handler for a URL across every app of the Raketa monorepo
     (Symfony <code>app/raketa/api</code>, Slim services in <code>api/*</code>, legacy entry points).
-    Ctrl+click on a URL in a behat <code>.feature</code> step opens its controller.
+    Also finds console commands of every console (<code>bus:translate-stations</code>, a pasted
+    <code>php api/hotels/cli/sabre sync:api:service</code>).
+    Ctrl+click on a URL or a stubbed command in a behat <code>.feature</code> step opens its controller.
     Paste a URL such as <code>https://raketa.in/api/profiles/645701/remarks</code> into Search Everywhere.
     Routes are dumped by <em>Tools → Rebuild Raketa Route Index</em> into the gitignored
     <code>.idea/raketa-routes.json</code>.

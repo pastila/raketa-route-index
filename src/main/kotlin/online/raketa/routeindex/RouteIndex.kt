@@ -17,7 +17,7 @@ class RouteIndex(private val project: Project) {
     @Volatile
     private var cached: Snapshot? = null
 
-    class Snapshot(val modified: Long, val routes: List<CompiledRoute>, val generatedAt: String?)
+    class Snapshot(val modified: Long, val routes: List<CompiledRoute>, val commands: List<ConsoleCommand>, val generatedAt: String?)
 
     val indexFile: Path? get() = project.basePath?.let { Path.of(it, ".idea", FILE_NAME) }
 
@@ -44,6 +44,19 @@ class RouteIndex(private val project: Project) {
             .toList()
     }
 
+    fun searchCommands(pattern: String, limit: Int = 100): List<CommandMatch> {
+        val commands = snapshot()?.commands ?: return emptyList()
+        return commands.asSequence()
+            .mapNotNull { CommandMatcher.match(it, pattern) }
+            .sortedWith(compareByDescending<CommandMatch> { it.score }.thenBy { it.command.name })
+            .take(limit)
+            .toList()
+    }
+
+    /** Commands named exactly [name] (or by an alias), e.g. from a behat `команда "..."` step. */
+    fun resolveCommand(name: String): List<ConsoleCommand> =
+        snapshot()?.commands?.filter { it.name == name || name in it.aliases } ?: emptyList()
+
     /**
      * Routes of [app] serving `METHOD url`: the best-scored ones (GET and POST on one path both come
      * back when the method is unknown). Full-path matches win over tail matches.
@@ -54,7 +67,9 @@ class RouteIndex(private val project: Project) {
     private fun load(file: Path, modified: Long): Snapshot {
         val root = Files.newBufferedReader(file).use { JsonParser.parseReader(it).asJsonObject }
         val routes = root.getAsJsonArray("routes").map { parseRoute(it.asJsonObject) }
-        return Snapshot(modified, routes.map { CompiledRoute(it) }, root.str("generatedAt"))
+        // Dumps before version 2 have no commands.
+        val commands = root.getAsJsonArray("commands")?.map { parseCommand(it.asJsonObject) } ?: emptyList()
+        return Snapshot(modified, routes.map { CompiledRoute(it) }, commands, root.str("generatedAt"))
     }
 
     companion object {
@@ -89,6 +104,18 @@ class RouteIndex(private val project: Project) {
             file = o.str("file"),
             line = o.get("line")?.takeIf { !it.isJsonNull }?.asInt ?: 0,
             name = o.str("name"),
+        )
+
+        fun parseCommand(o: JsonObject): ConsoleCommand = ConsoleCommand(
+            name = o.str("name") ?: "",
+            aliases = o.strList("aliases"),
+            description = o.str("description") ?: "",
+            hidden = o.get("hidden")?.takeIf { !it.isJsonNull }?.asBoolean ?: false,
+            handler = o.str("handler"),
+            file = o.str("file"),
+            line = o.get("line")?.takeIf { !it.isJsonNull }?.asInt ?: 0,
+            apps = o.strList("apps"),
+            entries = o.strList("entries"),
         )
 
         private fun JsonObject.str(key: String): String? = get(key)?.takeIf { !it.isJsonNull }?.asString

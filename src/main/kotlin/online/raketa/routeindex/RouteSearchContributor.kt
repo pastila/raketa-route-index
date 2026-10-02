@@ -17,9 +17,10 @@ import java.nio.file.Path
 import javax.swing.JList
 import javax.swing.ListCellRenderer
 
-/** A found route, or the "index is missing — build it" hint. */
+/** A found route or console command, or the "index is missing — build it" hint. */
 sealed interface RouteItem {
     data class Found(val match: RouteMatch) : RouteItem
+    data class Command(val match: CommandMatch) : RouteItem
     data object BuildIndex : RouteItem
 }
 
@@ -40,19 +41,26 @@ class RouteSearchContributor(private val project: Project) : WeightedSearchEvery
         if (pattern.trim().length < 3) return
         val index = RouteIndex.getInstance(project)
         if (index.snapshot() == null) {
-            if (RouteQuery.parse(pattern).looksLikeUrl) consumer.process(FoundItemDescriptor(RouteItem.BuildIndex, 0))
+            if (RouteQuery.parse(pattern).looksLikeUrl || COMMAND_NAME.containsMatchIn(pattern)) {
+                consumer.process(FoundItemDescriptor(RouteItem.BuildIndex, 0))
+            }
             return
         }
         for (match in index.search(pattern)) {
             progressIndicator.checkCanceled()
             if (!consumer.process(FoundItemDescriptor(RouteItem.Found(match), match.score))) return
         }
+        for (match in index.searchCommands(pattern)) {
+            progressIndicator.checkCanceled()
+            if (!consumer.process(FoundItemDescriptor(RouteItem.Command(match), match.score))) return
+        }
     }
 
     override fun processSelectedItem(selected: RouteItem, modifiers: Int, searchText: String): Boolean {
         when (selected) {
             is RouteItem.BuildIndex -> RefreshRoutesAction.refresh(project)
-            is RouteItem.Found -> navigate(project, selected.match.route.route)
+            is RouteItem.Found -> navigate(project, selected.match.route.route.file, selected.match.route.route.line)
+            is RouteItem.Command -> navigate(project, selected.match.command.file, selected.match.command.line)
         }
         return true
     }
@@ -80,6 +88,14 @@ class RouteSearchContributor(private val project: Project) : WeightedSearchEvery
                     append("  ${route.app}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
                     toolTipText = route.handler
                 }
+                is RouteItem.Command -> {
+                    val command = value.match.command
+                    icon = AllIcons.Nodes.Console
+                    append("${command.name} ", SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
+                    append(command.handler?.let { shortHandler(it) } ?: "класс не найден", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    append("  ${command.entries.joinToString(", ")}", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
+                    toolTipText = listOfNotNull(command.handler, command.description.ifEmpty { null }).joinToString("\n")
+                }
             }
         }
     }
@@ -94,14 +110,17 @@ class RouteSearchContributor(private val project: Project) : WeightedSearchEvery
     companion object {
         const val ID = "RaketaRoutes"
 
+        /** `bus:translate-stations` — worth offering to build the index for. */
+        private val COMMAND_NAME = Regex("""\b[a-z][\w-]*:[\w:-]+""")
+
         /** `Ddd\Client\Profile\...\RemarkController::get` → `RemarkController::get` */
         fun shortHandler(handler: String): String = handler.substringAfterLast('\\')
 
-        fun navigate(project: Project, route: Route) {
+        fun navigate(project: Project, file: String?, line: Int) {
             val base = project.basePath ?: return
-            val file = route.file ?: return
+            if (file == null) return
             val vFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(Path.of(base, file)) ?: return
-            OpenFileDescriptor(project, vFile, maxOf(route.line - 1, 0), 0).navigate(true)
+            OpenFileDescriptor(project, vFile, maxOf(line - 1, 0), 0).navigate(true)
         }
     }
 }
