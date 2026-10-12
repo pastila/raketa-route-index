@@ -23,6 +23,7 @@ dependencies {
 
     intellijPlatform {
         local(providers.gradleProperty("localIdePath"))
+        bundledPlugin("com.jetbrains.php")
     }
 }
 
