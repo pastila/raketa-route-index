@@ -153,6 +153,15 @@ if ($only === null || in_array('static', $only, true)) {
     array_push($routes, ...$static);
 }
 
+rr_declarations($routes, [
+    'raketa' => ['app/raketa/api/config', 'core/config'],
+    'transfer' => ['api/transfer/config'],
+    'static-api' => ['api/static'],
+] + array_combine(
+    $slim = ['agency', 'client', 'mobile', 'oauth', 'profile', 'aeroexpress', 'avia', 'bus', 'contract', 'hotels', 'profile-sync', 'queue', 'rail'],
+    array_map(static fn (string $dir): array => ["api/$dir"], $slim),
+));
+
 exec("rm -rf " . escapeshellarg($tmpDir));
 
 echo json_encode(
@@ -257,6 +266,189 @@ function rr_static_routes(): array
         }
     }
     return $routes;
+}
+
+/**
+ * Where each route is declared, as `declaration: {file, line}`: a `#[Route]` attribute above the handler
+ * method, else the line of the routing files of its app (`$group->post('/x', Handler::class)`,
+ * `->add('name', '/x')->controller('Handler::get')`, yaml `controller:`) that names the handler class,
+ * preferring one with the route's path tail or name nearby. File-based apps (fcc, planeta, static) have none.
+ *
+ * @param array<string, list<string>> $roots app id => dirs with its routing files, relative to the repo
+ */
+function rr_declarations(array &$routes, array $roots): void
+{
+    $refs = [];
+    foreach ($roots as $app => $dirs) {
+        $refs[$app] = rr_class_refs($dirs);
+    }
+    $sources = [];
+    foreach ($routes as &$route) {
+        $refsOfApp = $refs[$route['app']] ?? null;
+        if ($refsOfApp === null || !str_contains($route['handler'], '::')) {
+            continue;
+        }
+        [$class, $method] = explode('::', $route['handler'], 2);
+        if ($route['file'] !== null && $route['line'] > 0) {
+            $sources[$route['file']] ??= @file(RR_WEB . '/' . $route['file'], FILE_IGNORE_NEW_LINES) ?: [];
+            $line = rr_attribute_line($sources[$route['file']], $route['line'], $route);
+            if ($line !== null) {
+                $route['declaration'] = ['file' => $route['file'], 'line' => $line];
+                continue;
+            }
+        }
+        $short = strtolower(substr(strrchr('\\' . $class, '\\'), 1));
+        $best = null;
+        // Refs resolved to this very class; by the short name only when the file's imports didn't tell
+        $candidates = $refsOfApp['refs'][strtolower($class)] ?? $refsOfApp['short'][$short] ?? [];
+        foreach ($candidates as [$file, $i]) {
+            if ($file === $route['file']) {
+                continue;
+            }
+            $lines = $refsOfApp['files'][$file];
+            $score = preg_match('/\b' . preg_quote($method, '/') . '\b/', $lines[$i]) ? 1 : 0;
+            $at = $i;
+            // ->add('name', '/path') goes a line or two above ->controller(); a multi-line ->post( puts the path above the class
+            for ($j = $i; $j >= max(0, $i - 4); $j--) {
+                // the previous route, or the group this one is in — its prefix is a path tail too
+                if ($j < $i && preg_match('/::class|::\w+[\'"]|;\s*$|\{\s*$|->group\(/', $lines[$j])) {
+                    break;
+                }
+                $hit = rr_literal_score($lines[$j], $route);
+                if ($hit > 0 && $hit + 10 > $score) {
+                    [$score, $at] = [$hit + 10, $j];
+                }
+            }
+            if ($best === null || $score > $best[0]) {
+                $best = [$score, $file, $at];
+            }
+        }
+        if ($best !== null) {
+            $route['declaration'] = ['file' => $best[1], 'line' => $best[2] + 1];
+        }
+    }
+}
+
+/**
+ * @return array{files: array<string, list<string>>, refs: array<string, list<array{0: string, 1: int}>>, short: array<string, list<array{0: string, 1: int}>>}
+ *     lines of every php/yaml file under $dirs; where each class is referenced (`Handler::class`,
+ *     `[Handler::class, 'get']`, `'Ns\Handler::method'`, Slim `'Ns\Handler:method'`, yaml `controller: Ns\Handler::method`)
+ *     by its lowercased FQN, resolved through the file's namespace and `use` imports (aliases included); `short` —
+ *     the same refs by the short name, the fallback when nothing resolves to the class
+ */
+function rr_class_refs(array $dirs): array
+{
+    $files = [];
+    $refs = [];
+    $short = [];
+    foreach ($dirs as $dir) {
+        if (!is_dir(RR_WEB . "/$dir")) {
+            continue;
+        }
+        $it = new RecursiveIteratorIterator(new RecursiveCallbackFilterIterator(
+            new RecursiveDirectoryIterator(RR_WEB . "/$dir", FilesystemIterator::SKIP_DOTS),
+            static fn (SplFileInfo $f): bool => !$f->isDir()
+                || !in_array($f->getFilename(), ['vendor', 'node_modules', 'features', 'tests', 'var', 'storage', 'cache', 'docs', 'Generated'], true),
+        ));
+        foreach ($it as $f) {
+            if (!preg_match('/\.(php|ya?ml)$/', $f->getFilename())) {
+                continue;
+            }
+            $text = (string) @file_get_contents($f->getPathname());
+            if (!preg_match('/::class|::\w+(?:[\'"]|\s*$)|:\w+[\'"]/m', $text)) {
+                continue;
+            }
+            $rel = substr($f->getPathname(), strlen(RR_WEB) + 1);
+            $files[$rel] = explode("\n", $text);
+            $namespace = preg_match('/^namespace\s+([\w\\\\]+)/m', $text, $m) ? $m[1] . '\\' : '';
+            $imports = [];
+            preg_match_all('/^use\s+\\\\?([\w\\\\]+)(?:\s+as\s+(\w+))?\s*;/mi', $text, $uses, PREG_SET_ORDER);
+            foreach ($uses as $use) {
+                $imports[strtolower($use[2] ?? '' ?: substr(strrchr('\\' . $use[1], '\\'), 1))] = $use[1];
+            }
+            foreach ($files[$rel] as $i => $line) {
+                if (preg_match('/^\s*(use|namespace)\s/', $line)) {
+                    continue;
+                }
+                preg_match_all('/(\\\\?[A-Za-z_]\w*(?:\\\\[A-Za-z_]\w*)*)(::class\b|::\w+(?=[\'"]|\s*$)|:\w+(?=[\'"]))/', $line, $m, PREG_SET_ORDER);
+                foreach ($m as [, $name, $suffix]) {
+                    $parts = explode('\\', ltrim($name, '\\'));
+                    if ($suffix !== '::class' || str_starts_with($name, '\\')) {
+                        $fqn = ltrim($name, '\\'); // strings and yaml hold full names
+                    } elseif (isset($imports[strtolower($parts[0])])) {
+                        $fqn = implode('\\', [$imports[strtolower($parts[0])], ...array_slice($parts, 1)]);
+                    } else {
+                        $fqn = $namespace . $name;
+                    }
+                    $refs[strtolower($fqn)][] = [$rel, $i];
+                    $short[strtolower(end($parts))][] = [$rel, $i];
+                }
+            }
+        }
+    }
+    return ['files' => $files, 'refs' => $refs, 'short' => $short];
+}
+
+/**
+ * The `#[Route]` attribute of this route above the handler method (Symfony attribute controllers): the one
+ * with its name, else with its path tail, else the only one.
+ */
+function rr_attribute_line(array $lines, int $methodLine, array $route): ?int
+{
+    $blocks = [];
+    for ($i = $methodLine - 2; $i >= 0; $i--) {
+        $text = rtrim($lines[$i] ?? '');
+        if ($text === '' || preg_match('/[;{}]$/', $text)) {
+            break;
+        }
+        if (preg_match('/#\[(?:[\w\\\\]*\\\\)?Route\b/', $text)) {
+            $blocks[] = $i;
+        }
+    }
+    if ($blocks === []) {
+        return null;
+    }
+    $best = null;
+    foreach ($blocks as $start) {
+        $score = 0;
+        for ($i = $start; $i < $methodLine - 1; $i++) {
+            if ($i > $start && preg_match('/#\[/', $lines[$i])) {
+                break;
+            }
+            $score = max($score, rr_literal_score($lines[$i], $route));
+        }
+        if ($best === null || $score > $best[0]) {
+            $best = [$score, $start];
+        }
+    }
+    return $best[1] + 1;
+}
+
+/**
+ * How well the quoted strings of a line point at the route: its name or a name suffix (prefixed collections),
+ * or a path tail, longer is better; 0 when nothing fits.
+ */
+function rr_literal_score(string $line, array $route): int
+{
+    preg_match_all('/[\'"]([^\'"]+)[\'"]/', $line, $m);
+    $literals = $m[1];
+    if (preg_match('/^([\w.-]+):\s*$/', $line, $key)) {
+        $literals[] = $key[1]; // yaml route key
+    }
+    $name = (string) ($route['name'] ?? '');
+    $path = $route['path'];
+    $score = 0;
+    foreach ($literals as $literal) {
+        if ($name !== '' && strlen($literal) >= 4 && str_ends_with($name, $literal)) {
+            $score = max($score, 1000 + strlen($literal));
+        }
+        // Slim optional segments `/x[/{id}]` are expanded in the index
+        $tail = str_replace(['[', ']'], '', $literal);
+        if (str_starts_with($tail, '/') && strlen($tail) > 1 && str_ends_with($path, rtrim($tail, '/'))) {
+            $score = max($score, 100 + strlen($tail));
+        }
+    }
+    return $score;
 }
 
 function rr_route(string $app, array $hosts, array $methods, string $path, string $file): array

@@ -159,6 +159,8 @@ def main():
         if kind == "route":
             methods = "|".join(r["methods"]) or "ANY"
             print(f"{score:5} {methods:6} {r['path']}  [{r['app']}]\n      {r['handler']}  {r['file']}:{r['line']}")
+            if decl := r.get("declaration"):
+                print(f"      declared  {decl['file']}:{decl['line']}")
         else:
             print(f"{score:5} CLI    {r['name']}  [{', '.join(r['entries'])}]\n      {r['handler']}  {r['file']}:{r['line']}")
     if not found:

@@ -4,7 +4,8 @@ package online.raketa.routeindex
  * One route from `.idea/raketa-routes.json`, as written by the dumper.
  *
  * [path] uses `{name}` placeholders; a placeholder may carry its regex inline (`{id:\d+}`)
- * or in [requirements].
+ * or in [requirements]. [declarationFile]:[declarationLine] is where the route is declared (`$group->post(...)`,
+ * `->add(...)`, `#[Route]`, a yaml key); null for file-based apps and dumps made before it was collected.
  */
 data class Route(
     val app: String,
@@ -16,6 +17,8 @@ data class Route(
     val file: String?,
     val line: Int,
     val name: String?,
+    val declarationFile: String? = null,
+    val declarationLine: Int = 0,
 )
 
 data class RouteMatch(val route: CompiledRoute, val score: Int, val kind: Kind) {

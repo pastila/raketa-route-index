@@ -104,6 +104,8 @@ class RouteIndex(private val project: Project) {
             file = o.str("file"),
             line = o.get("line")?.takeIf { !it.isJsonNull }?.asInt ?: 0,
             name = o.str("name"),
+            declarationFile = o.getAsJsonObject("declaration")?.str("file"),
+            declarationLine = o.getAsJsonObject("declaration")?.get("line")?.asInt ?: 0,
         )
 
         fun parseCommand(o: JsonObject): ConsoleCommand = ConsoleCommand(

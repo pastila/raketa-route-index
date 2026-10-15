@@ -32,7 +32,8 @@ import javax.swing.JList
 
 /**
  * An icon on every controller method in the index — the reverse of the URL search. The tooltip lists its
- * routes; a click offers to copy each URL (local stand host) or path, and to find the behat steps that call it.
+ * routes; a click offers to copy each URL (local stand host) or path, to go to where the route is declared,
+ * and to find the behat steps that call it.
  */
 class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
     override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
@@ -81,6 +82,12 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
             group.add(CopyAction("Копировать URL $url", url))
             val path = RouteTarget.displayPath(route.path)
             if (path != url) group.add(CopyAction("Копировать путь $path", path))
+            route.declarationFile?.let { file ->
+                group.add(object : AnAction("Перейти к объявлению ${file.substringAfterLast('/')}:${route.declarationLine}", file, AllIcons.Actions.Forward), DumbAware {
+                    override fun getActionUpdateThread() = ActionUpdateThread.BGT
+                    override fun actionPerformed(e: AnActionEvent) = RouteSearchContributor.navigate(project, file, route.declarationLine)
+                })
+            }
         }
         group.add(Separator.create())
         group.add(object : AnAction("Найти в feature-файлах", null, AllIcons.Actions.Find), DumbAware {

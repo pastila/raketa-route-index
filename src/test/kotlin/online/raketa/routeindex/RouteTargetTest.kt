@@ -68,5 +68,21 @@ class RouteTargetTest {
         assertTrue(methods.all { it in RouteTarget.forMethod(all, it.file!!, it.handler.substringAfter("::")) })
         val chatRoutes = RouteTarget.forMethod(all, chatFile, "__invoke")
         assertEquals(listOf("https://mobile.raketa.in/v3/chat/service/{serviceId}"), chatRoutes.map { RouteTarget.url(it) })
+        val declared = methods.count { it.declarationFile != null }
+        assumeTrue("dump without declarations", declared > 0)
+        assertTrue("declared $declared of ${methods.size}", declared > methods.size * 0.99)
+        assertEquals("api/mobile/src/RoutingBuilder.php", chatRoutes.single().declarationFile)
+        val repo = File(path).parentFile.parentFile
+        val line = File(repo, chatRoutes.single().declarationFile!!).readLines()[chatRoutes.single().declarationLine - 1]
+        assertTrue(line, line.contains("'/chat/service/{serviceId:[0-9]+}'") && line.contains("PostMessageForServiceHandler::class"))
+    }
+
+    @Test
+    fun `declaration is read from the dump`() {
+        val json = """{"app":"mobile","hosts":[],"methods":["POST"],"path":"/x","handler":"A::b","file":"a.php","line":3,"name":null,"declaration":{"file":"r.php","line":7}}"""
+        val route = RouteIndex.parseRoute(JsonParser.parseString(json).asJsonObject)
+        assertEquals("r.php" to 7, route.declarationFile to route.declarationLine)
+        val old = RouteIndex.parseRoute(JsonParser.parseString(json.replace(Regex(",\"declaration\".*}}"), "}")).asJsonObject)
+        assertEquals(null to 0, old.declarationFile to old.declarationLine)
     }
 }
