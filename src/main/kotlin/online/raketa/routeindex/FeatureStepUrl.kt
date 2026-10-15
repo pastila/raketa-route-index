@@ -76,29 +76,29 @@ object FeatureStepUrl {
     /**
      * @param lines the whole file split into lines
      * @param lineIndex line under the caret
-     * @param column caret column in that line
+     * @param column caret column in that line; null takes the step's URL wherever it is
      * @param filePath project-relative path, used when no response step names the app
      */
-    fun find(lines: List<String>, lineIndex: Int, column: Int, filePath: String): Hit? {
+    fun find(lines: List<String>, lineIndex: Int, column: Int?, filePath: String): Hit? {
         val line = lines.getOrNull(lineIndex) ?: return null
 
         STUB.find(line)?.let { m ->
             val url = m.groups[3]!!
-            if (column !in url.range.first..url.range.last + 1) return null
+            if (column != null && column !in url.range.first..url.range.last + 1) return null
             val app = STUB_APPS[normalize(m.groupValues[1])] ?: return null
             return Hit(m.groupValues[2], url.value, url.range.first, url.range.last + 1, app)
         }
 
         REQUEST.find(line)?.let { m ->
             val url = m.groups[2]!!
-            if (column !in url.range.first..url.range.last + 1) return null
+            if (column != null && column !in url.range.first..url.range.last + 1) return null
             val app = fixStatic(responseApp(lines, lineIndex + 1, stopAtScenario = true), filePath)
             return Hit(m.groupValues[1], url.value, url.range.first, url.range.last + 1, app)
         }
 
         FEATURE.find(line)?.let { m ->
             val url = m.groups[2]!!
-            if (column !in url.range.first..url.range.last + 1) return null
+            if (column != null && column !in url.range.first..url.range.last + 1) return null
             val app = fixStatic(responseApp(lines, lineIndex + 1, stopAtScenario = false), filePath)
             return Hit(m.groupValues[1], url.value, url.range.first, url.range.last + 1, app)
         }

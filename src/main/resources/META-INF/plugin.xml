@@ -8,6 +8,7 @@
     Also finds console commands of every console (<code>bus:translate-stations</code>, a pasted
     <code>php api/hotels/cli/sabre sync:api:service</code>).
     A gutter ▶ on a command class runs or debugs it through any of its consoles.
+    A gutter icon on a controller method copies its URL and finds the behat steps calling it.
     Ctrl+click on a URL or a stubbed command in a behat <code>.feature</code> step opens its controller.
     Paste a URL such as <code>https://raketa.in/api/profiles/645701/remarks</code> into Search Everywhere.
     Routes are dumped by <em>Tools → Rebuild Raketa Route Index</em> into the gitignored
@@ -21,6 +22,7 @@
         <searchEverywhereContributor implementation="online.raketa.routeindex.RouteSearchContributor$Factory"/>
         <gotoDeclarationHandler implementation="online.raketa.routeindex.FeatureUrlGotoDeclarationHandler"/>
         <runLineMarkerContributor language="PHP" implementationClass="online.raketa.routeindex.CommandRunLineMarkerContributor"/>
+        <codeInsight.lineMarkerProvider language="PHP" implementationClass="online.raketa.routeindex.RouteLineMarkerProvider"/>
         <notificationGroup id="Raketa Routes" displayType="BALLOON"/>
     </extensions>
 
