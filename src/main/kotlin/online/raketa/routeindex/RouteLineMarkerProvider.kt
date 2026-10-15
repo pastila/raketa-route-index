@@ -3,6 +3,7 @@ package online.raketa.routeindex
 import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.codeInsight.daemon.LineMarkerProvider
 import com.intellij.icons.AllIcons
+import com.intellij.ide.DataManager
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -60,7 +61,7 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
                         ?.let { RouteTarget.forMethod(it, path, methodName) }
                 }.orEmpty().ifEmpty { targets }
                 JBPopupFactory.getInstance()
-                    .createActionGroupPopup(null, actions(elt.project, current), { _ -> null }, ActionSelectionAid.SPEEDSEARCH, false)
+                    .createActionGroupPopup(null, actions(elt.project, current), DataManager.getInstance().getDataContext(event.component), ActionSelectionAid.SPEEDSEARCH, false)
                     .show(RelativePoint(event))
             },
             GutterIconRenderer.Alignment.LEFT,
