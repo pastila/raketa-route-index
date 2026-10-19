@@ -7,7 +7,8 @@
     (Symfony <code>app/raketa/api</code>, Slim services in <code>api/*</code>, legacy entry points).
     Also finds console commands of every console (<code>bus:translate-stations</code>, a pasted
     <code>php api/hotels/cli/sabre sync:api:service</code>).
-    A gutter ▶ on a command class runs or debugs it through any of its consoles.
+    A gutter ▶ on a command class runs or debugs it through any of its consoles: as a PHP Script in PhpStorm,
+    with <code>docker exec</code> in IDEs with another PHP plugin (Raketa with PHP for OpenIDE).
     A gutter icon on a controller method copies its URL, goes to the route declaration and finds the behat steps calling it.
     Ctrl+click on a URL or a stubbed command in a behat <code>.feature</code> step opens its controller.
     Paste a URL such as <code>https://raketa.in/api/profiles/645701/remarks</code> into Search Everywhere.
@@ -16,13 +17,21 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
-    <depends>com.jetbrains.php</depends>
+    <!-- The ▶ of console commands as PHP Script; without PhpStorm's PHP plugin it runs `docker exec` -->
+    <depends optional="true" config-file="php-run.xml">com.jetbrains.php</depends>
+
+    <extensionPoints>
+        <extensionPoint qualifiedName="online.raketa.routeindex.commandLauncher"
+                        interface="online.raketa.routeindex.CommandLauncher" dynamic="true"/>
+    </extensionPoints>
 
     <extensions defaultExtensionNs="com.intellij">
         <searchEverywhereContributor implementation="online.raketa.routeindex.RouteSearchContributor$Factory"/>
         <gotoDeclarationHandler implementation="online.raketa.routeindex.FeatureUrlGotoDeclarationHandler"/>
         <runLineMarkerContributor language="PHP" implementationClass="online.raketa.routeindex.CommandRunLineMarkerContributor"/>
         <codeInsight.lineMarkerProvider language="PHP" implementationClass="online.raketa.routeindex.RouteLineMarkerProvider"/>
+        <configurationType implementation="online.raketa.routeindex.ConsoleCommandConfigurationType"/>
+        <programRunner implementation="online.raketa.routeindex.ConsoleCommandDebugRunner"/>
         <notificationGroup id="Raketa Routes" displayType="BALLOON"/>
     </extensions>
 

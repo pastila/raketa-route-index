@@ -23,6 +23,13 @@
 строке из дампа, поэтому значок не съезжает при правке файла; новая команда получает ▶ после
 пересборки индекса.
 
+Без PHP-плагина JetBrains (Raketa с PHP for OpenIDE) ▶ создаёт конфигурацию **Raketa Console Command**:
+`docker exec -w /web/<приложение> raketa-php php /web/<консоль> <команда>`. Run выключает Xdebug
+(`-d xdebug.mode=off`), Debug передаёт `XDEBUG_SESSION=1` и `XDEBUG_MODE=debug`. Соединение принимает
+PHP-плагин IDE, если он слушает Xdebug и в нём задано сопоставление проекта с `/web`. Контейнер тот же, что у
+пересборки индекса (`-Draketa.routes.container`, `RAKETA_PHP_CONTAINER`), путь проекта в контейнере —
+`-Draketa.routes.containerRoot` (по умолчанию `/web`).
+
 ## Маршрут у контроллера
 
 Обратная сторона поиска: на методе-обработчике каждого маршрута из индекса (`__invoke()` операции Slim,
@@ -105,3 +112,5 @@ export JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/phpstorm/jbr
 ```
 
 Собирается против локально установленного PhpStorm (`localIdePath` в `gradle.properties`), IDE не скачивается.
+Зависимость от PHP-плагина JetBrains необязательная (`php-run.xml`), поэтому тот же zip ставится и в Raketa;
+значки в гутере работают с любым PHP-плагином, объявляющим язык `PHP`.

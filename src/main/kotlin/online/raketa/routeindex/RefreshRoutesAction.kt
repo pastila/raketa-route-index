@@ -38,6 +38,10 @@ class RefreshRoutesAction : AnAction() {
                 ?: System.getenv("RAKETA_PHP_CONTAINER")
                 ?: "raketa-php"
 
+        /** Where the project is mounted in [container]; the dumper assumes `/web` too. */
+        val containerRoot: String
+            get() = (System.getProperty("raketa.routes.containerRoot") ?: "/web").trimEnd('/')
+
         fun refresh(project: Project) {
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Сбор маршрутов Raketa", true) {
                 override fun run(indicator: ProgressIndicator) {

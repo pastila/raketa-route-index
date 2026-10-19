@@ -1,0 +1,5 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="online.raketa.routeindex">
+        <commandLauncher implementation="online.raketa.routeindex.PhpScriptCommandLauncher"/>
+    </extensions>
+</idea-plugin>
