@@ -46,18 +46,22 @@ class RefreshRoutesAction : AnAction() {
             ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Сбор маршрутов Raketa", true) {
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = true
-                    val result = runDumper(project)
-                    notify(project, result.first, if (result.second) NotificationType.INFORMATION else NotificationType.ERROR)
+                    val (message, type) = runDumper(project)
+                    notify(project, message, type)
                 }
             })
         }
 
-        /** @return message and success flag */
-        private fun runDumper(project: Project): Pair<String, Boolean> {
-            val target = RouteIndex.getInstance(project).indexFile ?: return "Нет базового каталога проекта" to false
+        /**
+         * @return message and its severity: an error when nothing was written, and also when some app or console
+         * gave nothing — the index is written, but its routes are missing and no gutter icon will say so.
+         */
+        private fun runDumper(project: Project): Pair<String, NotificationType> {
+            val error = NotificationType.ERROR
+            val target = RouteIndex.getInstance(project).indexFile ?: return "Нет базового каталога проекта" to error
             val script = RefreshRoutesAction::class.java.getResourceAsStream("/dumper/dump-routes.php")
                 ?.use { it.readBytes() }
-                ?: return "В плагине нет dumper/dump-routes.php" to false
+                ?: return "В плагине нет dumper/dump-routes.php" to error
 
             // xdebug.mode=off: with a listening PhpStorm every php process in the container hangs
             val cmd = GeneralCommandLine("docker", "exec", "-i", container, "php", "-d", "xdebug.mode=off")
@@ -65,10 +69,10 @@ class RefreshRoutesAction : AnAction() {
             val handler = CapturingProcessHandler(cmd)
             handler.processInput.use { it.write(script) }
             val out = handler.runProcess(TIMEOUT_MS)
-            if (out.isTimeout) return "Сборщик маршрутов не уложился в ${TIMEOUT_MS / 1000} с" to false
+            if (out.isTimeout) return "Сборщик маршрутов не уложился в ${TIMEOUT_MS / 1000} с" to error
             if (out.exitCode != 0 || !out.stdout.trimStart().startsWith("{")) {
                 val err = (out.stderr + "\n" + out.stdout).trim().take(2000)
-                return "docker exec $container php завершился с кодом ${out.exitCode}:\n$err" to false
+                return "docker exec $container php завершился с кодом ${out.exitCode}:\n$err" to error
             }
 
             Files.createDirectories(target.parent)
@@ -77,16 +81,22 @@ class RefreshRoutesAction : AnAction() {
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
 
             val snapshot = RouteIndex.getInstance(project).snapshot()
-                ?: return "Файл $target записан, но не читается" to false
-            val warnings = out.stderr.lines().filter { it.isNotBlank() }
+                ?: return "Файл $target записан, но не читается" to error
+            val failed = snapshot.failed
+            val warnings = out.stderr.lines().filter { it.isNotBlank() && !it.contains("] failed: ") }
             val msg = buildString {
+                if (failed.isNotEmpty()) {
+                    append("Не собрано: ${failed.keys.joinToString(", ")}\n")
+                    failed.entries.take(10).forEach { append("• ${it.key}: ${it.value.take(300)}\n") }
+                    append("\n")
+                }
                 append("Маршрутов: ${snapshot.routes.size}")
                 val byApp = snapshot.routes.groupingBy { it.route.app }.eachCount()
                 append(" (").append(byApp.entries.joinToString(", ") { "${it.key}: ${it.value}" }).append(")")
                 append("\nКонсольных команд: ${snapshot.commands.size}")
                 if (warnings.isNotEmpty()) append("\n").append(warnings.take(10).joinToString("\n"))
             }
-            return msg to true
+            return msg to if (failed.isEmpty()) NotificationType.INFORMATION else error
         }
 
         private fun notify(project: Project, message: String, type: NotificationType) {

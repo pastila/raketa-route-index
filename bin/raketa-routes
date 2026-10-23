@@ -17,7 +17,17 @@ case "$cmd" in
         mkdir -p "$root/.idea"
         docker exec -i "$CONTAINER" php -d xdebug.mode=off -- < "$DUMPER" > "$out.tmp"
         mv "$out.tmp" "$out"
-        python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(len(d['routes']),'routes',d['apps']);print(len(d.get('commands',[])),'commands',d.get('consoles'))" "$out"
+        # Failures go last and fail the command: a half-empty index is easy to miss in the stderr above.
+        python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(len(d['routes']), 'routes', d['apps'])
+print(len(d.get('commands', [])), 'commands', d.get('consoles'))
+failed = d.get('failed') or {}
+for name, reason in failed.items():
+    print('\033[31mNOT COLLECTED ' + name + ': ' + reason + '\033[0m', file=sys.stderr)
+sys.exit(1 if failed else 0)
+" "$out"
         ;;
     find)
         query="${1:?usage: raketa-routes find <url|command|text> [raketa-dir]}"

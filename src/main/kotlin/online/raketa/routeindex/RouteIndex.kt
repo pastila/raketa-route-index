@@ -17,7 +17,14 @@ class RouteIndex(private val project: Project) {
     @Volatile
     private var cached: Snapshot? = null
 
-    class Snapshot(val modified: Long, val routes: List<CompiledRoute>, val commands: List<ConsoleCommand>, val generatedAt: String?)
+    /** [failed]: app id or console entry → why the dumper got nothing from it. */
+    class Snapshot(
+        val modified: Long,
+        val routes: List<CompiledRoute>,
+        val commands: List<ConsoleCommand>,
+        val generatedAt: String?,
+        val failed: Map<String, String> = emptyMap(),
+    )
 
     val indexFile: Path? get() = project.basePath?.let { Path.of(it, ".idea", FILE_NAME) }
 
@@ -69,7 +76,8 @@ class RouteIndex(private val project: Project) {
         val routes = root.getAsJsonArray("routes").map { parseRoute(it.asJsonObject) }
         // Dumps before version 2 have no commands.
         val commands = root.getAsJsonArray("commands")?.map { parseCommand(it.asJsonObject) } ?: emptyList()
-        return Snapshot(modified, routes.map { CompiledRoute(it) }, commands, root.str("generatedAt"))
+        val failed = root.getAsJsonObject("failed")?.entrySet()?.associate { it.key to it.value.asString } ?: emptyMap()
+        return Snapshot(modified, routes.map { CompiledRoute(it) }, commands, root.str("generatedAt"), failed)
     }
 
     companion object {

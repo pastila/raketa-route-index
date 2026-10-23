@@ -27,7 +27,7 @@ data class RouteMatch(val route: CompiledRoute, val score: Int, val kind: Kind) 
 
 /**
  * A console command from `.idea/raketa-routes.json`. One record per command class: the same command
- * may be served by several [entries] (`core/bin/console` and `app/raketa/api/bin/console`, every
+ * may be served by several [entries] (`api/hotels/cli/sabre` and `api/hotels/cli/ostrovok`, every
  * script in `api/profile-sync/cli`). [handler] and [file] are null when the class wasn't found (maker-bundle).
  */
 data class ConsoleCommand(

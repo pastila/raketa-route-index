@@ -16,8 +16,19 @@ declare(strict_types=1);
 const RR_WEB = '/web';
 const RR_TIMEOUT = 120;
 const RR_MARKER = '@@RAKETA_ROUTES@@';
-/** Env a console needs only to list its commands: MAILER_DSN is set on stage/prod only. */
-const RR_CONSOLE_ENV = ['api/transfer/bin/console' => ['MAILER_DSN' => 'null://null']];
+/** Env a console needs only to list its commands: MAILER_DSN is set on stage/prod only. By app id. */
+const RR_CONSOLE_ENV = ['transfer' => ['MAILER_DSN' => 'null://null']];
+/**
+ * What nginx doesn't tell, by the app id taken from its `server_name ~^<id>(...)`: `id` — the id in the
+ * index (`static` there is app/static, see rr_static_routes()), `hosts` — instead of `<id>.raketa.in`,
+ * `legacy` — a file-based app (lc::parseRequestFile()), its routes are the files of public/.
+ */
+const RR_APP_OVERRIDES = [
+    'raketa' => ['hosts' => ['raketa.in', 'master.*']], // stage: matched by the first label
+    'static' => ['id' => 'static-api'],
+    'fcc' => ['legacy' => true],
+    'planeta' => ['legacy' => true],
+];
 
 $pretty = in_array('--pretty', $argv, true);
 $only = null;
@@ -27,51 +38,13 @@ foreach ($argv as $arg) {
     }
 }
 
-// app id => [hosts, boot code]. Hosts follow .docker/nginx/sites-enabled: `<name>.raketa.in`.
-$slimCore = static fn (string $dir, string $factory, string $sentry): string => <<<PHP
-    require '/web/core/vendor/autoload.php';
-    require '/web/api/{$dir}/vendor/autoload.php';
-    rr_dotenv();
-    \$f = new {$factory}();
-    CoreConfigurator::configure(\$f->makeDatabaseFactory(), microtime(true), '{$sentry}');
-    rr_emit(rr_slim(\$f->make()));
-    PHP;
-$slimStandalone = static fn (string $dir, string $build): string => <<<PHP
-    require '/web/api/{$dir}/vendor/autoload.php';
-    rr_dotenv();
-    rr_emit(array_merge(rr_slim({$build}), rr_health('/web/api/{$dir}')));
-    PHP;
-
-$apps = [
-    'raketa' => [['raketa.in', 'master.*'] /* stage: matched by the first label */, <<<'PHP'
-        require '/web/core/vendor/autoload.php';
-        require '/web/app/raketa/api/vendor/autoload.php';
-        rr_dotenv();
-        CoreConfigurator::configure(new Raketa\Database\DatabaseConfigFactory(), microtime(true), 'raketa-cli');
-        $env = getenv('APPLICATION_ENV') === 'production' ? 'prod' : 'dev';
-        rr_emit(rr_symfony(new App\Kernel($env, !empty($_SERVER['DEVELOPER_MODE']))));
-        PHP],
-    'transfer' => [['transfer.raketa.in'], <<<'PHP'
-        require '/web/api/transfer/vendor/autoload.php';
-        rr_dotenv();
-        $kernel = (new Api\Transfer\Infrastructure\KernelKernelFactory())->makeKernel($_SERVER + $_ENV, microtime(true));
-        rr_emit(array_merge(rr_symfony($kernel), rr_health('/web/api/transfer')));
-        PHP],
-    'agency' => [['agency.raketa.in'], $slimCore('agency', 'AgencyApi\AgencyApiAppFactory', 'api-agency')],
-    'client' => [['client.raketa.in'], $slimCore('client', 'ClientService\ClientApiAppFactory', 'api-client')],
-    'mobile' => [['mobile.raketa.in'], $slimCore('mobile', 'Mobile\MobileApiAppFactory', 'api-mobile')],
-    'oauth' => [['oauth.raketa.in'], $slimCore('oauth', 'API\OAuthServer\OauthApiAppFactory', 'api-oauth')],
-    'profile' => [['profile.raketa.in'], $slimCore('profile', 'API\Profiles\ProfileApiAppFactory', 'api-profile')],
-    'aeroexpress' => [['aeroexpress.raketa.in'], $slimStandalone('aeroexpress', '(new API\Aeroexpress\App\AppBuilder())->buildHttpApp(microtime(true))')],
-    'avia' => [['avia.raketa.in'], $slimStandalone('avia', '(new Api\Avia\AppBuilder())->httpApp(microtime(true))')],
-    'bus' => [['bus.raketa.in'], $slimStandalone('bus', '(new Api\Bus\Infrastructure\AppBuilder())->buildHttpApp(microtime(true))')],
-    'contract' => [['contract.raketa.in'], $slimStandalone('contract', '(new Api\Contract\V1\AppFactory())->make(microtime(true))')],
-    'hotels' => [['hotels.raketa.in'], $slimStandalone('hotels', '(new Api\Hotels\AppBuilder())->buildHttpApp(microtime(true))')],
-    'profile-sync' => [['profile-sync.raketa.in'], $slimStandalone('profile-sync', '(new Api\Sync\V1\AppFactory())->buildHttpApp(microtime(true))')],
-    'queue' => [['queue.raketa.in'], $slimStandalone('queue', '(new Api\Queue\V1\AppFactory())->makeHttpApp(microtime(true))')],
-    'rail' => [['rail.raketa.in'], $slimStandalone('rail', '(new API\Rail\App\AppBuilder())->buildHttpApp(microtime(true))')],
-    'static-api' => [['static.raketa.in'], $slimStandalone('static', '(new Api\Static\Infrastructure\AppBuilder())->buildHttpApp()')],
-];
+$apps = rr_nginx_apps();
+$failed = $apps['failed'];
+$apps = $apps['apps'];
+if ($only !== null) {
+    $apps = array_intersect_key($apps, array_flip($only));
+    $failed = array_intersect_key($failed, array_flip($only));
+}
 
 $helpers = rr_helpers_source();
 $tmpDir = sys_get_temp_dir() . '/raketa-routes-' . getmypid();
@@ -79,51 +52,57 @@ $tmpDir = sys_get_temp_dir() . '/raketa-routes-' . getmypid();
 
 // Start every app at once: booting a kernel takes seconds, the apps don't share state.
 $procs = [];
-foreach ($apps as $id => [$hosts, $boot]) {
-    if ($only !== null && !in_array($id, $only, true)) {
-        continue;
+foreach ($apps as $id => $app) {
+    if (isset($app['boot'])) {
+        $script = "$tmpDir/$id.php";
+        file_put_contents($script, "<?php\n" . $helpers . "\nrr_boot(" . var_export($app['boot'], true) . ");\n");
+        $procs[$id] = rr_start($tmpDir, $id, [$script]);
     }
-    $script = "$tmpDir/$id.php";
-    file_put_contents($script, "<?php\n" . $helpers . "\n" . $boot . "\n");
-    $procs[$id] = rr_start($tmpDir, $id, [$script]);
 }
 
 $routes = [];
 $apps_stats = [];
+$declarationRoots = [];
 foreach (rr_finish($procs) as $id => [$stdout, $stderr]) {
-    $appRoutes = rr_after_marker($stdout);
-    if ($appRoutes === null) {
-        rr_warn("[$id] failed: " . rr_tail($stderr !== '' ? $stderr : $stdout) . "\n");
+    $result = rr_after_marker($stdout);
+    if (!is_array($result['routes'] ?? null) || $result['routes'] === []) {
+        $failed[$id] = $apps[$id]['dir'] . ': ' . ($result === null ? rr_tail($stderr !== '' ? $stderr : $stdout) : 'приложение поднялось, но маршрутов 0');
         $apps_stats[$id] = 0;
         continue;
     }
-    foreach ($appRoutes as $r) {
+    foreach ($result['routes'] as $r) {
         $r['app'] = $id;
         $r['requirements'] = (object) ($r['requirements'] ?? []); // json_decode(assoc) turned {} into []
-        $r['hosts'] = array_values(array_unique(array_merge($r['hosts'] ?? [], $apps[$id][0])));
+        $r['hosts'] = array_values(array_unique(array_merge($r['hosts'] ?? [], $apps[$id]['hosts'])));
         $routes[] = $r;
     }
-    $apps_stats[$id] = count($appRoutes);
+    $apps_stats[$id] = count($result['routes']);
+    // Symfony keeps its routing in config/ (attribute controllers of core — in core/config), Slim builds it anywhere in the app.
+    $dir = $apps[$id]['dir'];
+    $declarationRoots[$id] = $result['kind'] === 'symfony'
+        ? array_merge(["$dir/config"], $apps[$id]['boot']['core'] ? ['core/config'] : [])
+        : [$dir];
 }
 
 // Console commands: every console entry point runs its own `list --format=json`, a prepended
 // script maps the listed names to the command classes loaded by then. After the routes, so the
 // raketa kernel isn't compiled into the same di-cache by two processes at once.
+$consoles = rr_console_entries($apps);
 $prelude = "$tmpDir/console-prelude.php";
 file_put_contents($prelude, rr_console_prelude_source());
 $procs = [];
-foreach (rr_console_entries() as $entry => $id) {
+foreach ($consoles as $entry => $id) {
     if ($only !== null && !in_array($id, $only, true)) {
         continue;
     }
-    $procs[$entry] = rr_start($tmpDir, str_replace('/', '_', $entry), ['-d', "auto_prepend_file=$prelude", RR_WEB . "/$entry", 'list', '--format=json'], RR_CONSOLE_ENV[$entry] ?? []);
+    $procs[$entry] = rr_start($tmpDir, str_replace('/', '_', $entry), ['-d', "auto_prepend_file=$prelude", RR_WEB . "/$entry", 'list', '--format=json'], RR_CONSOLE_ENV[$id] ?? []);
 }
 $commands = [];
 $entries_stats = [];
 foreach (rr_finish($procs) as $entry => [$stdout, $stderr]) {
     $entryCommands = rr_console_commands($stdout);
     if ($entryCommands === null) {
-        rr_warn("[$entry] failed: " . rr_tail($stderr !== '' ? $stderr : $stdout) . "\n");
+        $failed[$entry] = rr_tail($stderr !== '' ? $stderr : $stdout);
         $entries_stats[$entry] = 0;
         continue;
     }
@@ -132,20 +111,19 @@ foreach (rr_finish($procs) as $entry => [$stdout, $stderr]) {
     foreach ($entryCommands as $c) {
         $key = $c['name'] . '|' . $c['handler'];
         $commands[$key] ??= ['apps' => [], 'entries' => []] + $c;
-        $commands[$key]['apps'] = array_values(array_unique([...$commands[$key]['apps'], rr_console_entries()[$entry]]));
+        $commands[$key]['apps'] = array_values(array_unique([...$commands[$key]['apps'], $consoles[$entry]]));
         $commands[$key]['entries'][] = $entry;
     }
     $entries_stats[$entry] = count($entryCommands);
 }
 $commands = array_values($commands);
 
-foreach ([['fcc', ['fcc.raketa.in']], ['planeta', ['planeta.raketa.in']]] as [$id, $hosts]) {
-    if ($only !== null && !in_array($id, $only, true)) {
-        continue;
+foreach ($apps as $id => $app) {
+    if ($app['legacy']) {
+        $legacy = rr_legacy_routes($id, $app['hosts'], $app['public']);
+        $apps_stats[$id] = count($legacy);
+        array_push($routes, ...$legacy);
     }
-    $legacy = rr_legacy_routes($id, $hosts);
-    $apps_stats[$id] = count($legacy);
-    array_push($routes, ...$legacy);
 }
 if ($only === null || in_array('static', $only, true)) {
     $static = rr_static_routes();
@@ -153,19 +131,16 @@ if ($only === null || in_array('static', $only, true)) {
     array_push($routes, ...$static);
 }
 
-rr_declarations($routes, [
-    'raketa' => ['app/raketa/api/config', 'core/config'],
-    'transfer' => ['api/transfer/config'],
-    'static-api' => ['api/static'],
-] + array_combine(
-    $slim = ['agency', 'client', 'mobile', 'oauth', 'profile', 'aeroexpress', 'avia', 'bus', 'contract', 'hotels', 'profile-sync', 'queue', 'rail'],
-    array_map(static fn (string $dir): array => ["api/$dir"], $slim),
-));
+rr_declarations($routes, $declarationRoots);
 
 exec("rm -rf " . escapeshellarg($tmpDir));
 
+foreach ($failed as $id => $reason) {
+    rr_warn("[$id] failed: $reason\n");
+}
+
 echo json_encode(
-    ['version' => 2, 'generatedAt' => date('c'), 'apps' => $apps_stats, 'consoles' => $entries_stats, 'routes' => $routes, 'commands' => $commands],
+    ['version' => 2, 'generatedAt' => date('c'), 'apps' => $apps_stats, 'consoles' => $entries_stats, 'failed' => (object) $failed, 'routes' => $routes, 'commands' => $commands],
     JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | ($pretty ? JSON_PRETTY_PRINT : 0),
 ), "\n";
 
@@ -224,9 +199,9 @@ function rr_tail(string $text): string
  * fcc and planeta are file-based: lc::parseRequestFile() maps the URL straight to
  * public/<path>, `dir/` → `dir/index.php`; `*.inc.php` are never served.
  */
-function rr_legacy_routes(string $app, array $hosts): array
+function rr_legacy_routes(string $app, array $hosts, string $public): array
 {
-    $root = RR_WEB . "/app/$app/public";
+    $root = RR_WEB . "/$public";
     $routes = [];
     $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
     foreach ($it as $file) {
@@ -235,7 +210,7 @@ function rr_legacy_routes(string $app, array $hosts): array
             continue;
         }
         $url = str_ends_with($path, '/index.php') ? substr($path, 0, -strlen('index.php')) : $path;
-        $routes[] = rr_route($app, $hosts, [], $url, "app/$app/public$path");
+        $routes[] = rr_route($app, $hosts, [], $url, "$public$path");
     }
     return $routes;
 }
@@ -467,42 +442,160 @@ function rr_route(string $app, array $hosts, array $methods, string $path, strin
 }
 
 /**
- * Console entry points: `core/bin/console`, `app/raketa/api/bin/console` and the extension-less
- * php scripts in `api/<service>/{bin,cli}` that build a console application. Not `warmup-cache`
- * (it warms up as soon as it starts) and not the service-framework template.
+ * Apps served by nginx (.docker/nginx/sites-enabled): the id from `server_name ~^<id>(...)`, the dirs from
+ * `root` — the server one and the location ones (api-static serves /api from api/static). How to boot an app
+ * is read from its public/index.php, see rr_index_boot(); a vhost with an index.php nobody can read is a
+ * failure, one without index.php (docs, assets) is not an app.
  *
+ * @return array{apps: array<string, array{hosts: list<string>, dir: string, public: string, legacy: bool, boot?: array}>, failed: array<string, string>}
+ */
+function rr_nginx_apps(): array
+{
+    $apps = [];
+    $failed = [];
+    foreach (glob(RR_WEB . '/.docker/nginx/sites-enabled/*.conf') ?: [] as $conf) {
+        $text = (string) file_get_contents($conf);
+        if (!preg_match('/^\s*server_name\s+~\^([a-z][\w-]*)/mi', $text, $m)) {
+            continue;
+        }
+        $override = RR_APP_OVERRIDES[$m[1]] ?? [];
+        $id = $override['id'] ?? $m[1];
+        preg_match_all('/^\s*root\s+' . preg_quote(RR_WEB, '/') . '\/([^;\s]+?)\/?;/m', $text, $roots);
+        $publics = array_values(array_filter(array_unique($roots[1]), static fn (string $r): bool => is_file(RR_WEB . "/$r/index.php")));
+        if ($publics === []) {
+            continue;
+        }
+        $app = ['hosts' => $override['hosts'] ?? ["{$m[1]}.raketa.in"], 'legacy' => (bool) ($override['legacy'] ?? false)];
+        if ($app['legacy']) {
+            $apps[$id] = $app + ['dir' => dirname($publics[0]), 'public' => $publics[0]];
+            continue;
+        }
+        foreach ($publics as $public) {
+            $boot = rr_index_boot($public);
+            if ($boot !== null) {
+                $apps[$id] = $app + ['dir' => dirname($public), 'public' => $public, 'boot' => $boot];
+                continue 2;
+            }
+        }
+        $failed[$id] = 'не понять, как поднять приложение из ' . implode(', ', array_map(static fn (string $p): string => "$p/index.php", $publics))
+            . ' — добавьте вариант в rr_index_boot() или RR_APP_OVERRIDES';
+    }
+    return ['apps' => $apps, 'failed' => $failed];
+}
+
+/**
+ * How public/index.php builds the app, without running it:
+ * - `RaketaHttpApp::makeWithoutOverrides(new Factory(), $startTime, 'sentry-tag')` — a core app factory;
+ * - `(new Builder())->method($startTime)` or `$b = new Builder(); $b->method(...)` — the method returns the app.
+ * The files it requires (`__DIR__ . '/../vendor/autoload.php'`) are required as well; Symfony Runtime's
+ * autoload_runtime.php would run the returned closure, so the plain autoload.php instead.
+ *
+ * @return array{dir: string, requires: list<string>, factory: string, method: ?string, sentry: string, core: bool}|null
+ */
+function rr_index_boot(string $public): ?array
+{
+    $source = (string) file_get_contents(RR_WEB . "/$public/index.php");
+    if (preg_match('/makeWithoutOverrides\(\s*new\s+(\\\\?[\w\\\\]+)\(\)\s*,\s*\$\w+\s*,\s*[\'"]([^\'"]+)[\'"]/', $source, $m)) {
+        [$factory, $method, $sentry] = [$m[1], null, $m[2]];
+    } elseif (preg_match('/new\s+(\\\\?[\w\\\\]+)\(\)\s*\)?\s*(?:;\s*\$\w+\s*)?->\s*(\w+)\(/', $source, $m)) {
+        [$factory, $method, $sentry] = [$m[1], $m[2], 'raketa-routes'];
+    } else {
+        return null;
+    }
+    $requires = [];
+    preg_match_all('/require(?:_once)?\s*\(?\s*(__DIR__|dirname\(__DIR__\))\s*\.\s*[\'"]([^\'"]+)[\'"]/', $source, $req, PREG_SET_ORDER);
+    foreach ($req as [, $base, $tail]) {
+        $file = rr_normalize(RR_WEB . '/' . ($base === '__DIR__' ? $public : dirname($public)) . $tail);
+        $requires[] = str_ends_with($file, '/vendor/autoload_runtime.php') ? dirname($file) . '/autoload.php' : $file;
+    }
+    return [
+        'dir' => RR_WEB . '/' . dirname($public),
+        'requires' => $requires,
+        'factory' => rr_index_class($factory, $source),
+        'method' => $method,
+        'sentry' => $sentry,
+        'core' => in_array(RR_WEB . '/core/vendor/autoload.php', $requires, true),
+    ];
+}
+
+/** A class name of index.php through its `use` imports. */
+function rr_index_class(string $name, string $source): string
+{
+    if (str_starts_with($name, '\\')) {
+        return ltrim($name, '\\');
+    }
+    $first = explode('\\', $name)[0];
+    preg_match_all('/^use\s+\\\\?([\w\\\\]+)(?:\s+as\s+(\w+))?\s*;/mi', $source, $uses, PREG_SET_ORDER);
+    foreach ($uses as $use) {
+        if (strcasecmp($use[2] ?? '' ?: substr(strrchr('\\' . $use[1], '\\'), 1), $first) === 0) {
+            return $use[1] . substr($name, strlen($first));
+        }
+    }
+    $ns = preg_match('/^namespace\s+([\w\\\\]+)\s*;/m', $source, $n) ? $n[1] . '\\' : '';
+    return $ns . $name;
+}
+
+/** `/web/app/raketa/api/raketa/public/../../../../../core/x` → `/web/core/x` without touching the disk. */
+function rr_normalize(string $path): string
+{
+    $parts = [];
+    foreach (explode('/', $path) as $part) {
+        if ($part === '..') {
+            array_pop($parts);
+        } elseif ($part !== '.' && $part !== '') {
+            $parts[] = $part;
+        }
+    }
+    return '/' . implode('/', $parts);
+}
+
+/**
+ * Console entry points: the extension-less php scripts in a `bin`/`cli` dir of app/ and api/
+ * (`app/raketa/bin/console`, `api/hotels/cli/sabre`) that build a console application. Not `warmup-cache`
+ * and `raketa-cache-warmup` (they warm up as soon as they start) and not the service-framework template.
+ * The app is the one whose vendor/autoload.php the script requires, else the dir under api/.
+ *
+ * @param array<string, array{dir: string}> $apps
  * @return array<string, string> entry path relative to the repo => app id
  */
-function rr_console_entries(): array
+function rr_console_entries(array $apps): array
 {
-    static $entries = null;
-    if ($entries !== null) {
-        return $entries;
+    $byDir = [];
+    foreach ($apps as $id => $app) {
+        $byDir[RR_WEB . "/{$app['dir']}/vendor/autoload.php"] = $id;
+    }
+    $files = [];
+    foreach (['app', 'api'] as $top) {
+        $it = new RecursiveIteratorIterator(new RecursiveCallbackFilterIterator(
+            new RecursiveDirectoryIterator(RR_WEB . "/$top", FilesystemIterator::SKIP_DOTS),
+            static fn (SplFileInfo $f): bool => $f->isDir()
+                ? !in_array($f->getFilename(), ['vendor', 'node_modules', 'frontend', 'public', 'src', 'features', 'tests', 'storage', 'var', 'service-framework'], true)
+                : in_array(basename($f->getPath()), ['bin', 'cli'], true),
+        ));
+        $it->setMaxDepth(4);
+        foreach ($it as $f) {
+            $files[] = $f->getPathname();
+        }
     }
     $entries = [];
-    $files = array_merge(
-        glob(RR_WEB . '/core/bin/console') ?: [],
-        glob(RR_WEB . '/app/*/api/bin/console') ?: [],
-        glob(RR_WEB . '/api/*/bin/*') ?: [],
-        glob(RR_WEB . '/api/*/cli/*') ?: [],
-    );
     foreach ($files as $file) {
         $entry = substr($file, strlen(RR_WEB) + 1);
         $name = basename($file);
-        if (!is_file($file) || str_contains($name, '.') || $name === 'warmup-cache' || str_starts_with($entry, 'api/service-framework/')) {
+        if (!is_file($file) || str_contains($name, '.') || str_contains($name, 'warmup')) {
             continue;
         }
         $source = (string) file_get_contents($file);
         if (!str_starts_with($source, '#!') || !preg_match('/buildCommandApp|commandApp\(|makeCommandApp|new Application\(/i', $source)) {
             continue;
         }
-        $entries[$entry] = match (true) {
-            $entry === 'core/bin/console' => 'core',
-            str_starts_with($entry, 'app/') => explode('/', $entry)[1],
-            str_starts_with($entry, 'api/static/') => 'static-api',
-            default => explode('/', $entry)[1],
-        };
+        $id = null;
+        preg_match_all('/(__DIR__|dirname\(__DIR__\))\s*\.\s*[\'"]([^\'"]*vendor\/autoload\.php)[\'"]/', $source, $req, PREG_SET_ORDER);
+        foreach ($req as [, $base, $tail]) {
+            $id ??= $byDir[rr_normalize(($base === '__DIR__' ? dirname($file) : dirname($file, 2)) . $tail)] ?? null;
+        }
+        $entries[$entry] = $id ?? (preg_match('#(?:^|/)api/([\w-]+)/#', $entry, $m) ? ($m[1] === 'static' ? 'static-api' : $m[1]) : explode('/', $entry)[1]);
     }
+    ksort($entries);
     return $entries;
 }
 
@@ -638,11 +731,75 @@ function rr_helpers_source(): string
             'REQUEST_ID' => str_repeat('0', 32), // api/avia checks for 32 chars
         ];
 
-        function rr_emit(array $routes): void
+        function rr_emit(array $routes, string $kind): void
         {
             // Apps may echo while booting; the parent reads what follows the last marker.
-            echo "\n@@RAKETA_ROUTES@@", json_encode($routes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), "\n";
+            echo "\n@@RAKETA_ROUTES@@", json_encode(['kind' => $kind, 'routes' => $routes], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), "\n";
             exit(0);
+        }
+
+        /**
+         * Builds the app the way its index.php does (see rr_index_boot()) and emits its routes: a core app
+         * factory is configured and made like RaketaHttpApp does, else the builder method is called with
+         * what its parameters ask for. Symfony or Slim — by what turns up inside the result.
+         */
+        function rr_boot(array $spec): void
+        {
+            foreach ($spec['requires'] as $file) {
+                require_once $file;
+            }
+            rr_dotenv();
+            $factory = new $spec['factory']();
+            if ($spec['method'] === null) {
+                CoreConfigurator::configure($factory->makeDatabaseFactory(), microtime(true), $spec['sentry']);
+                $app = $factory->make();
+            } else {
+                $app = rr_call($factory, $spec['method']);
+            }
+            $health = $spec['core'] ? [] : rr_health($spec['dir']);
+            if (($kernel = rr_find($app, Symfony\Component\HttpKernel\KernelInterface::class)) !== null) {
+                rr_emit(array_merge(rr_symfony($kernel), $health), 'symfony');
+            }
+            if (($slim = rr_find($app, 'Slim\App')) !== null) {
+                rr_emit(array_merge(rr_slim($slim), $health), 'slim');
+            }
+            throw new RuntimeException("Neither a Symfony kernel nor a Slim app inside " . get_debug_type($app) . " from {$spec['factory']}");
+        }
+
+        /** `$startTime` / `float` gets microtime(true), an array (Symfony Runtime `$context`) — the env. */
+        function rr_call(object $factory, string $method): mixed
+        {
+            $args = [];
+            foreach ((new ReflectionMethod($factory, $method))->getParameters() as $p) {
+                if ($p->isOptional()) {
+                    break;
+                }
+                $type = (string) $p->getType();
+                $args[] = str_contains($type, 'array') ? $_SERVER + $_ENV : microtime(true);
+            }
+            return $factory->$method(...$args);
+        }
+
+        /** $class itself, or in a property of it, a level or two down (RaketaHttpApp → SymfonyToPsrAdapter → Kernel). */
+        function rr_find(mixed $value, string $class, int $depth = 3): ?object
+        {
+            if (!is_object($value)) {
+                return null;
+            }
+            if (is_a($value, $class)) {
+                return $value;
+            }
+            if ($depth === 0 || $value instanceof Closure) {
+                return null;
+            }
+            for ($rc = new ReflectionObject($value); $rc !== false; $rc = $rc->getParentClass()) {
+                foreach ($rc->getProperties() as $p) {
+                    if (!$p->isStatic() && $p->isInitialized($value) && ($found = rr_find($p->getValue($value), $class, $depth - 1)) !== null) {
+                        return $found;
+                    }
+                }
+            }
+            return null;
         }
 
         function rr_dotenv(): void
@@ -784,23 +941,8 @@ function rr_helpers_source(): string
             return [$pattern];
         }
 
-        function rr_find_slim(object $app): ?Slim\App
+        function rr_slim(Slim\App $slim): array
         {
-            if ($app instanceof Slim\App) {
-                return $app;
-            }
-            foreach ((new ReflectionObject($app))->getProperties() as $p) {
-                $p->setAccessible(true);
-                if ($p->isInitialized($app) && ($v = $p->getValue($app)) instanceof Slim\App) {
-                    return $v;
-                }
-            }
-            return null;
-        }
-
-        function rr_slim(object $app): array
-        {
-            $slim = rr_find_slim($app) ?? throw new RuntimeException('No Slim\App inside ' . get_class($app));
             $routes = [];
             foreach ($slim->getRouteCollector()->getRoutes() as $route) {
                 $callable = $route->getCallable();

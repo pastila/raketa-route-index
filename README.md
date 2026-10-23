@@ -14,7 +14,7 @@
 ## ▶ у консольных команд
 
 На `execute()`/`__invoke()` каждой команды из индекса в гутере появляется ▶: **Run** и **Debug** через
-каждую консоль, которая её обслуживает (`core/bin/console`, `app/raketa/api/bin/console`,
+каждую консоль, которая её обслуживает (`app/raketa/bin/console`, `app/fcc/cli/fcc`,
 `api/hotels/cli/sabre`, …). Запуск — временная конфигурация **PHP Script** на интерпретаторе проекта
 по умолчанию (`php (Docker)`), рабочий каталог — корень приложения консоли (`core`, `api/hotels`),
 так что Debug сам включает прослушивание Xdebug. Конфигурация с тем же именем (`<команда>` или
@@ -74,22 +74,40 @@ action Symfony-контроллера) в гутере стоит значок, 
 кроме `.idea/raketa-routes.json` (`.idea/` в `.gitignore`). Каждое приложение поднимается в
 отдельном процессе с cwd во временном каталоге контейнера (приложения сорят логами в cwd).
 
-| Приложение | Хост | Как собираются маршруты |
-|---|---|---|
-| `raketa` | raketa.in | Symfony `router` (`app/raketa/api` + attribute-контроллеры `core/config/routes/*.yaml`) |
-| `transfer` | transfer.* | Symfony `router` |
-| agency, client, mobile, oauth, profile | `<name>.*` | Slim `RouteCollector` из `*AppFactory::make()`; замыкания `api/profile` разворачиваются в `...Operation::class` |
-| aeroexpress, avia, bus, contract, hotels, profile-sync, queue, rail, static-api | `<name>.*` | Slim из AppBuilder (у avia/hotels достаётся рефлексией из обёртки) + `GET /health` из middleware |
-| fcc, planeta | `<name>.*` | файловые: `public/**/*.php` без `*.inc.php`, `dir/index.php` → `dir/` |
-| static | `/static/` | правила `static.conf` + файлы `app/static/public` |
+**Список приложений и их каталоги не прописаны** — они берутся из `.docker/nginx/sites-enabled/*.conf`:
+id и хост `<id>.raketa.in` — из `server_name ~^<id>(...)`, каталог — из `root` (серверного или
+`location`: у `static` `/api` обслуживает `api/static`). Как поднять приложение, читается из его
+`public/index.php`:
 
-Консольные команды. Консоли — `core/bin/console`, `app/raketa/api/bin/console` и php-скрипты без
-расширения в `api/<service>/{bin,cli}`, которые собирают консольное приложение (кроме `warmup-cache` и
-шаблона `service-framework`; `api/avia/cli/*.php` — обычные скрипты, они находятся через Go to File).
+- `RaketaHttpApp::makeWithoutOverrides(new XxxAppFactory(), $startTime, 'api-xxx')` — приложение на core:
+  `CoreConfigurator::configure($f->makeDatabaseFactory(), …)`, затем `$f->make()`;
+- `(new AppBuilder())->buildHttpApp($startTime)` / `$b = new AppBuilder(); $b->httpApp(...)` — метод
+  вызывается рефлексией: `float`-параметрам — `microtime(true)`, `array` (`$context` Symfony Runtime) — env.
+
+Подключается то же, что `require`-ит `index.php` (`autoload_runtime.php` заменяется на `autoload.php`).
+Symfony или Slim — по тому, что нашлось внутри результата (`RaketaHttpApp` → `SymfonyToPsrAdapter` →
+`Kernel`): Symfony отдаёт `router`, Slim — `RouteCollector` (замыкания `api/profile` разворачиваются в
+`...Operation::class`); у приложений не на core — ещё `GET /health` из middleware. Объявления маршрутов
+ищутся в `config/` Symfony-приложения (у приложений на core — ещё в `core/config`), у Slim — во всём каталоге.
+
+Что из nginx не следует — в `RR_APP_OVERRIDES` по id: `raketa` — хосты `raketa.in` и `master.*`,
+`static` — id `static-api` (`static` занят `/static/`), `fcc` и `planeta` — файловые
+(`public/**/*.php` без `*.inc.php`, `dir/index.php` → `dir/`). `/static/` на хостах raketa, fcc и planeta —
+правила `static.conf` + файлы `app/static/public`.
+
+**Сбой виден.** Приложение, чей `index.php` не разобрался, которое упало при сборке или отдало 0
+маршрутов, попадает в `failed` индекса (вместе с упавшими консолями): плагин показывает
+уведомление-ошибку со списком, `bin/raketa-routes dump` печатает их красным последними и выходит с кодом 1.
+Индекс при этом всё равно записывается — с тем, что собралось.
+
+Консольные команды. Консоли — php-скрипты без расширения в каталогах `bin`/`cli` под `app/` и `api/`
+(`app/raketa/bin/console`, `api/hotels/cli/sabre`), которые собирают консольное приложение (кроме
+прогревов кеша `warmup-cache`, `raketa-cache-warmup` и шаблона `service-framework`; приложение консоли —
+то, чей `vendor/autoload.php` она подключает; `api/avia/cli/*.php` — обычные скрипты, они находятся через Go to File).
 Каждая запускается как есть с `list --format=json` и `auto_prepend_file`: на shutdown пролог отдаёт
 загруженные к этому моменту классы команд (`list` создаёт и lazy-команды), имя сопоставляется с классом
 по `#[AsCommand]`/`$defaultName`, иначе по имени в кавычках в файле класса (`configure()`, конструктор).
-Одинаковые команды разных консолей (core и raketa, все `profile-sync/cli`) хранятся одной записью со
+Одинаковые команды разных консолей (все `profile-sync/cli`, `hotels/cli`) хранятся одной записью со
 списком `entries`. Без класса остаются только `make:*` maker-bundle в transfer. `api/static/cli/run`
 локально не стартует, пока в его vendor нет `elasticsearch/elasticsearch` (`composer install` в `api/static`).
 

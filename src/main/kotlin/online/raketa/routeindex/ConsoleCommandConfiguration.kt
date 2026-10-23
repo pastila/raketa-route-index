@@ -112,7 +112,7 @@ class ConsoleCommandConfiguration(project: Project, factory: ConfigurationFactor
 /** The `docker exec` command line, apart from the platform for the tests. */
 object ConsoleCommandLine {
     /**
-     * `docker exec -w /web/core raketa-php php /web/core/bin/console bus:listen`. Run turns Xdebug off (with a
+     * `docker exec -w /web/app/raketa raketa-php php /web/app/raketa/bin/console bus:listen`. Run turns Xdebug off (with a
      * listening IDE every php process in the container would wait for it); Debug requests a session.
      */
     fun docker(container: String, root: String, entry: String, workingDirectory: String, arguments: List<String>, debug: Boolean): List<String> =
@@ -157,7 +157,7 @@ private class ConsoleCommandSettingsEditor : SettingsEditor<ConsoleCommandConfig
 
     override fun createEditor(): JComponent = panel {
         row("Контейнер:") { cell(container).align(AlignX.FILL).comment("docker exec &lt;контейнер&gt;") }
-        row("Консоль:") { cell(entry).align(AlignX.FILL).comment("Путь от корня проекта: core/bin/console") }
+        row("Консоль:") { cell(entry).align(AlignX.FILL).comment("Путь от корня проекта: app/raketa/bin/console") }
         row("Рабочий каталог:") { cell(workingDirectory).align(AlignX.FILL).comment("От корня проекта: core") }
         row("Аргументы:") { cell(arguments).align(AlignX.FILL) }
     }

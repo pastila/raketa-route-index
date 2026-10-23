@@ -122,7 +122,7 @@ object FeatureStepUrl {
         return if (app == null || (app == "static" && byPath == "static-api")) byPath else app
     }
 
-    /** api/<service>/features → that service; everything in core runs against raketa. */
+    /** `api/<service>/features`, `app/raketa/api/<service>/features` → that service; everything in core runs against raketa. */
     fun pathApp(filePath: String): String {
         val dir = API_DIR.find(filePath.replace('\\', '/'))?.groupValues?.get(1) ?: return "raketa"
         return if (dir == "static") "static-api" else dir
