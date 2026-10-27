@@ -38,16 +38,7 @@ import javax.swing.JList
  */
 class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
     override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
-        if (element.firstChild != null) return null
-        val methodName = element.text
-        if (methodName.isEmpty() || !methodName[0].isJavaIdentifierStart()) return null
-        val keyword = PsiTreeUtil.prevVisibleLeaf(element)?.text
-        if (keyword != "function" && keyword != "class") return null
-
-        val project = element.project
-        val file = relativePath(project, element) ?: return null
-        val routes = RouteIndex.getInstance(project).snapshot()?.routes?.map { it.route } ?: return null
-        val targets = targetsOf(routes, file, element, keyword)
+        val targets = routesAt(element)
         if (targets.isEmpty()) return null
 
         return LineMarkerInfo(
@@ -57,10 +48,7 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
             { _ -> targets.joinToString("<br>") { RouteTarget.title(it) } },
             { event, elt ->
                 // Re-read on click: the index may have been rebuilt since the marker was drawn.
-                val current = relativePath(elt.project, elt)?.let { path ->
-                    RouteIndex.getInstance(elt.project).snapshot()?.routes?.map { it.route }
-                        ?.let { targetsOf(it, path, elt, keyword) }
-                }.orEmpty().ifEmpty { targets }
+                val current = routesAt(elt).ifEmpty { targets }
                 JBPopupFactory.getInstance()
                     .createActionGroupPopup(null, actions(elt.project, current), DataManager.getInstance().getDataContext(event.component), ActionSelectionAid.SPEEDSEARCH, false)
                     .show(RelativePoint(event))
@@ -70,18 +58,31 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
         )
     }
 
-    /** `function name` — the routes of that method; `class Name` — the routes whose method is not in the file. */
-    private fun targetsOf(routes: List<Route>, file: String, element: PsiElement, keyword: String): List<Route> =
-        if (keyword == "function") {
-            RouteTarget.forMethod(routes, file, element.text)
-        } else {
-            RouteTarget.forClass(routes, file, element.text, element.containingFile?.text.orEmpty())
+    companion object {
+        /**
+         * The routes whose icon goes on [element]: for the name leaf of `function name` the routes of that method,
+         * for `class Name` the routes whose method is not in the file.
+         */
+        fun routesAt(element: PsiElement): List<Route> {
+            if (element.firstChild != null) return emptyList()
+            val name = element.text
+            if (name.isEmpty() || !name[0].isJavaIdentifierStart()) return emptyList()
+            val keyword = PsiTreeUtil.prevVisibleLeaf(element)?.text
+            if (keyword != "function" && keyword != "class") return emptyList()
+            val file = relativePath(element.project, element) ?: return emptyList()
+            val routes = RouteIndex.getInstance(element.project).snapshot()?.routes?.map { it.route } ?: return emptyList()
+            return if (keyword == "function") {
+                RouteTarget.forMethod(routes, file, name)
+            } else {
+                RouteTarget.forClass(routes, file, name, element.containingFile?.text.orEmpty())
+            }
         }
 
-    private fun relativePath(project: Project, element: PsiElement): String? {
-        val base = project.basePath ?: return null
-        val path = element.containingFile?.virtualFile?.path ?: return null
-        return path.takeIf { it.startsWith("$base/") }?.removePrefix("$base/")
+        private fun relativePath(project: Project, element: PsiElement): String? {
+            val base = project.basePath ?: return null
+            val path = element.containingFile?.virtualFile?.path ?: return null
+            return path.takeIf { it.startsWith("$base/") }?.removePrefix("$base/")
+        }
     }
 
     private fun actions(project: Project, routes: List<Route>): DefaultActionGroup {
