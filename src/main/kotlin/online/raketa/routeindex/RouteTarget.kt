@@ -11,6 +11,20 @@ object RouteTarget {
         routes.filter { it.file == file && it.handler.substringAfter("::", "").equals(methodName, ignoreCase = true) }
             .sortedWith(compareBy({ it.path }, { it.methods.joinToString() }))
 
+    /**
+     * Routes of the class [className] declared in [file] whose handler method is not in [fileText] — inherited
+     * (`__invoke()` of a base Slim operation) or from a trait — or that have no method at all. They get the icon
+     * on the class name, since there is no method of theirs to put it on.
+     */
+    fun forClass(routes: List<Route>, file: String, className: String, fileText: String): List<Route> =
+        routes.filter { route ->
+            if (route.file != file) return@filter false
+            val cls = route.handler.substringBefore("::").substringAfterLast('\\')
+            if (!cls.equals(className, ignoreCase = true)) return@filter false
+            val method = route.handler.substringAfter("::", "")
+            method.isEmpty() || !Regex("""\bfunction\s+&?${Regex.escape(method)}\b""", RegexOption.IGNORE_CASE).containsMatchIn(fileText)
+        }.sortedWith(compareBy({ it.path }, { it.methods.joinToString() }))
+
     /** `/v3/chat/service/{serviceId:[0-9]+}` → `/v3/chat/service/{serviceId}`: inline requirements dropped. */
     fun displayPath(path: String): String {
         val sb = StringBuilder()

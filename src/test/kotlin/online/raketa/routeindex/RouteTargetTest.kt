@@ -28,6 +28,19 @@ class RouteTargetTest {
     }
 
     @Test
+    fun `routes of an inherited method go to the class`() {
+        val file = "api/contract/v1/src/Operation/GetDataFieldsOperation.php"
+        val fields = route("contract", listOf("contract.raketa.in"), "GET", "/v1.0/dictionary/suppliers/{serviceType-supplier}/data-fields",
+            "Api\\Contract\\V1\\Operation\\GetDataFieldsOperation::__invoke", file)
+        val inherited = "final readonly class GetDataFieldsOperation extends BaseOperation {\n    public function handle() {}\n}"
+        assertEquals(listOf(fields), RouteTarget.forClass(listOf(fields), file, "GetDataFieldsOperation", inherited))
+        assertTrue(RouteTarget.forMethod(listOf(fields), file, "handle").isEmpty())
+        val own = "class GetDataFieldsOperation {\n    public function __invoke() {}\n}"
+        assertTrue(RouteTarget.forClass(listOf(fields), file, "GetDataFieldsOperation", own).isEmpty())
+        assertTrue(RouteTarget.forClass(listOf(fields), file, "Other", inherited).isEmpty())
+    }
+
+    @Test
     fun `url and path drop inline requirements`() {
         assertEquals("https://mobile.raketa.in/v3/chat/service/{serviceId}", RouteTarget.url(chat))
         assertEquals("/v1/{code}/x.{_format}", RouteTarget.displayPath("/v1/{code:\\d{3}}/x.{_format}"))

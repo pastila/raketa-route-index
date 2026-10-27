@@ -41,12 +41,13 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
         if (element.firstChild != null) return null
         val methodName = element.text
         if (methodName.isEmpty() || !methodName[0].isJavaIdentifierStart()) return null
-        if (PsiTreeUtil.prevVisibleLeaf(element)?.text != "function") return null
+        val keyword = PsiTreeUtil.prevVisibleLeaf(element)?.text
+        if (keyword != "function" && keyword != "class") return null
 
         val project = element.project
         val file = relativePath(project, element) ?: return null
         val routes = RouteIndex.getInstance(project).snapshot()?.routes?.map { it.route } ?: return null
-        val targets = RouteTarget.forMethod(routes, file, methodName)
+        val targets = targetsOf(routes, file, element, keyword)
         if (targets.isEmpty()) return null
 
         return LineMarkerInfo(
@@ -58,7 +59,7 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
                 // Re-read on click: the index may have been rebuilt since the marker was drawn.
                 val current = relativePath(elt.project, elt)?.let { path ->
                     RouteIndex.getInstance(elt.project).snapshot()?.routes?.map { it.route }
-                        ?.let { RouteTarget.forMethod(it, path, methodName) }
+                        ?.let { targetsOf(it, path, elt, keyword) }
                 }.orEmpty().ifEmpty { targets }
                 JBPopupFactory.getInstance()
                     .createActionGroupPopup(null, actions(elt.project, current), DataManager.getInstance().getDataContext(event.component), ActionSelectionAid.SPEEDSEARCH, false)
@@ -68,6 +69,14 @@ class RouteLineMarkerProvider : LineMarkerProvider, DumbAware {
             { "Raketa route" },
         )
     }
+
+    /** `function name` — the routes of that method; `class Name` — the routes whose method is not in the file. */
+    private fun targetsOf(routes: List<Route>, file: String, element: PsiElement, keyword: String): List<Route> =
+        if (keyword == "function") {
+            RouteTarget.forMethod(routes, file, element.text)
+        } else {
+            RouteTarget.forClass(routes, file, element.text, element.containingFile?.text.orEmpty())
+        }
 
     private fun relativePath(project: Project, element: PsiElement): String? {
         val base = project.basePath ?: return null
