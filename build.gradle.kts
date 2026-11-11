@@ -49,5 +49,6 @@ tasks {
         useJUnit()
         // ./gradlew test -PraketaRoutes=../raketa/.idea/raketa-routes.json — smoke test on a real dump
         providers.gradleProperty("raketaRoutes").orNull?.let { systemProperty("raketa.routes", file(it).absolutePath) }
+        providers.gradleProperty("raketaSpxPlugin").orNull?.let { systemProperty("raketa.spxPlugin", file(it).absolutePath) }
     }
 }

@@ -22,7 +22,7 @@ class CommandArgumentsDialog(
 
     init {
         title = "${executor.actionName}: ${target.configurationName}"
-        setOKButtonText(if (executor.id == "Debug") "Отладить" else "Запустить")
+        setOKButtonText(commandActionText(executor))
         init()
     }
 

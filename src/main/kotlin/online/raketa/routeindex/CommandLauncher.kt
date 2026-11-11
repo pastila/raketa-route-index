@@ -1,5 +1,6 @@
 package online.raketa.routeindex
 
+import com.intellij.execution.Executor
 import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
@@ -19,6 +20,13 @@ interface CommandLauncher {
         fun configuration(project: Project, target: CommandRunTarget): CommandLaunchConfiguration? =
             EP_NAME.extensionList.firstNotNullOfOrNull { it.configuration(project, target) }
                 ?: ConsoleCommandConfigurationType.configuration(project, target)
+
+        fun configuration(project: Project, target: CommandRunTarget, executor: Executor): CommandLaunchConfiguration? =
+            if (executor.id == SpxCommandLauncher.EXECUTOR_ID) {
+                SpxCommandLauncher.configuration(project, target) {
+                    configuration(project, target)?.arguments ?: target.command.name
+                }
+            } else configuration(project, target)
     }
 }
 
@@ -26,4 +34,10 @@ interface CommandLauncher {
 interface CommandLaunchConfiguration {
     val settings: RunnerAndConfigurationSettings
     var arguments: String
+}
+
+internal fun commandActionText(executor: Executor): String = when (executor.id) {
+    "Run" -> "Запустить"
+    "Debug" -> "Отладить"
+    else -> executor.actionName
 }

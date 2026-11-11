@@ -30,6 +30,15 @@
 Параметры используются и при последующих обычных Run/Debug, отмена диалога ничего не запускает.
 Чтобы IDE не удалила временную конфигурацию вместе с параметрами, сохраните её (Save Configuration).
 
+Если установлен **SPX Profiler** (`ru.raketa.php.spx`), в меню ▶ также доступны **Профилировать с SPX**
+и **Профилировать с SPX с аргументами…** (названия зависят от языка IDE).
+Создаётся отдельная конфигурация **PHP Script (SPX)** с суффиксом `(SPX)`: консоль и рабочий каталог
+берутся из индекса, аргументы при первом создании — из обычной конфигурации команды. Дальше параметры
+SPX-конфигурации сохраняются отдельно. Настройки профилирования, проверка наличия PHP-расширения SPX
+и открытие отчёта — штатные возможности SPX Profiler.
+Интерпретатор задаётся средствами SPX: с PHP for OpenIDE используется интерпретатор проекта (в том числе
+Docker), без него — `php` из `PATH` или исполняемый файл PHP, указанный в SPX-конфигурации.
+
 Без PHP-плагина JetBrains (Raketa с PHP for OpenIDE) ▶ создаёт конфигурацию **Raketa Console Command**:
 `docker exec -w /web/<приложение> raketa-php php /web/<консоль> <команда>`. Run выключает Xdebug
 (`-d xdebug.mode=off`), Debug передаёт `XDEBUG_SESSION=1` и `XDEBUG_MODE=debug`. Соединение принимает
@@ -143,6 +152,7 @@ Symfony или Slim — по тому, что нашлось внутри рез
 export JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/phpstorm/jbr
 ./gradlew buildPlugin          # build/distributions/raketa-route-index-*.zip → Settings → Plugins → ⚙ → Install from Disk
 ./gradlew test -PraketaRoutes=../raketa/.idea/raketa-routes.json   # + smoke-тест на реальном дампе
+./gradlew test -PraketaSpxPlugin=../raketa-storm/out/raketa/dist.all/plugins/raketa-php-spx/lib/raketa-php-spx.jar  # совместимость настроек SPX
 ```
 
 Собирается против локально установленного PhpStorm (`localIdePath` в `gradle.properties`), IDE не скачивается.

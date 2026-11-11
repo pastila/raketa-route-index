@@ -36,7 +36,11 @@ class CommandRunLineMarkerContributor : RunLineMarkerContributor(), DumbAware {
         if (targets.isEmpty()) return null
 
         // DefaultDebugExecutor lives in the debugger module, which isn't on the plugin's classpath.
-        val executors = listOfNotNull(DefaultRunExecutor.getRunExecutorInstance(), ExecutorRegistry.getInstance().getExecutorById("Debug"))
+        val executors = listOfNotNull(
+            DefaultRunExecutor.getRunExecutorInstance(),
+            ExecutorRegistry.getInstance().getExecutorById("Debug"),
+            SpxCommandLauncher.executor(),
+        )
         val actions = targets.flatMap { target ->
             executors.map { RunCommandAction(target, it) } +
                 executors.map { RunCommandAction(target, it, withArguments = true) }
@@ -52,7 +56,7 @@ class CommandRunLineMarkerContributor : RunLineMarkerContributor(), DumbAware {
         private val withArguments: Boolean = false,
     ) : AnAction(
         if (withArguments) {
-            val action = if (executor.id == "Debug") "Отладить" else "Запустить"
+            val action = commandActionText(executor)
             "$action '${target.configurationName}' с аргументами…"
         } else "${executor.actionName} '${target.configurationName}'",
         null,
@@ -63,7 +67,7 @@ class CommandRunLineMarkerContributor : RunLineMarkerContributor(), DumbAware {
 
         override fun actionPerformed(e: AnActionEvent) {
             val project = e.project ?: return
-            val configuration = CommandLauncher.configuration(project, target) ?: return
+            val configuration = CommandLauncher.configuration(project, target, executor) ?: return
             if (withArguments) {
                 val dialog = CommandArgumentsDialog(project, target, executor, configuration.arguments)
                 if (!dialog.showAndGet()) return
