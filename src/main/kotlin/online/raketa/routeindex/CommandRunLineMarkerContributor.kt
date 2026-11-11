@@ -37,22 +37,40 @@ class CommandRunLineMarkerContributor : RunLineMarkerContributor(), DumbAware {
 
         // DefaultDebugExecutor lives in the debugger module, which isn't on the plugin's classpath.
         val executors = listOfNotNull(DefaultRunExecutor.getRunExecutorInstance(), ExecutorRegistry.getInstance().getExecutorById("Debug"))
-        val actions = targets.flatMap { target -> executors.map { RunCommandAction(target, it) } }
+        val actions = targets.flatMap { target ->
+            executors.map { RunCommandAction(target, it) } +
+                executors.map { RunCommandAction(target, it, withArguments = true) }
+        }
         return Info(AllIcons.RunConfigurations.TestState.Run, actions.toTypedArray()) { _ ->
             targets.map { it.command.name }.distinct().joinToString(", ", prefix = "Run ")
         }
     }
 
-    private class RunCommandAction(private val target: CommandRunTarget, private val executor: Executor) :
-        AnAction("${executor.actionName} '${target.configurationName}'", null, executor.icon), DumbAware {
+    private class RunCommandAction(
+        private val target: CommandRunTarget,
+        private val executor: Executor,
+        private val withArguments: Boolean = false,
+    ) : AnAction(
+        if (withArguments) {
+            val action = if (executor.id == "Debug") "Отладить" else "Запустить"
+            "$action '${target.configurationName}' с аргументами…"
+        } else "${executor.actionName} '${target.configurationName}'",
+        null,
+        executor.icon,
+    ), DumbAware {
 
         override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
         override fun actionPerformed(e: AnActionEvent) {
             val project = e.project ?: return
-            val settings = CommandLauncher.configuration(project, target) ?: return
-            RunManager.getInstance(project).selectedConfiguration = settings
-            ProgramRunnerUtil.executeConfiguration(settings, executor)
+            val configuration = CommandLauncher.configuration(project, target) ?: return
+            if (withArguments) {
+                val dialog = CommandArgumentsDialog(project, target, executor, configuration.arguments)
+                if (!dialog.showAndGet()) return
+                configuration.arguments = dialog.arguments
+            }
+            RunManager.getInstance(project).selectedConfiguration = configuration.settings
+            ProgramRunnerUtil.executeConfiguration(configuration.settings, executor)
         }
     }
 }

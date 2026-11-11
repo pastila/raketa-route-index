@@ -55,19 +55,26 @@ class ConsoleCommandConfigurationType : SimpleConfigurationType(
     override fun getOptionsClass(): Class<out BaseState> = ConsoleCommandOptions::class.java
 
     companion object {
-        fun configuration(project: Project, target: CommandRunTarget): RunnerAndConfigurationSettings {
+        fun configuration(project: Project, target: CommandRunTarget): CommandLaunchConfiguration {
             val runManager = RunManager.getInstance(project)
             val type = ConfigurationTypeUtil.findConfigurationType(ConsoleCommandConfigurationType::class.java)
-            runManager.findConfigurationByTypeAndName(type, target.configurationName)?.let { return it }
-
-            val settings = runManager.createConfiguration(target.configurationName, type)
+            val settings = runManager.findConfigurationByTypeAndName(type, target.configurationName) ?: run {
+                val created = runManager.createConfiguration(target.configurationName, type)
+                val options = (created.configuration as ConsoleCommandConfiguration).options
+                options.container = RefreshRoutesAction.container
+                options.entry = target.entry
+                options.workingDirectory = target.workingDirectory
+                options.arguments = target.command.name
+                runManager.setTemporaryConfiguration(created)
+                created
+            }
             val options = (settings.configuration as ConsoleCommandConfiguration).options
-            options.container = RefreshRoutesAction.container
-            options.entry = target.entry
-            options.workingDirectory = target.workingDirectory
-            options.arguments = target.command.name
-            runManager.setTemporaryConfiguration(settings)
-            return settings
+            return object : CommandLaunchConfiguration {
+                override val settings: RunnerAndConfigurationSettings = settings
+                override var arguments: String
+                    get() = options.arguments.orEmpty()
+                    set(value) { options.arguments = value }
+            }
         }
     }
 }

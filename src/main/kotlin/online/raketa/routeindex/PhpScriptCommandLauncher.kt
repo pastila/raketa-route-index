@@ -11,18 +11,25 @@ import com.jetbrains.php.run.script.PhpScriptRunConfigurationType
  * for Xdebug by itself. Registered only when PhpStorm's PHP plugin is there.
  */
 class PhpScriptCommandLauncher : CommandLauncher {
-    override fun configuration(project: Project, target: CommandRunTarget): RunnerAndConfigurationSettings? {
+    override fun configuration(project: Project, target: CommandRunTarget): CommandLaunchConfiguration? {
         val base = project.basePath ?: return null
         val runManager = RunManager.getInstance(project)
         val type = PhpScriptRunConfigurationType.getInstance()
-        runManager.findConfigurationByTypeAndName(type, target.configurationName)?.let { return it }
-
-        val settings = runManager.createConfiguration(target.configurationName, type.configurationFactories.first())
+        val settings = runManager.findConfigurationByTypeAndName(type, target.configurationName) ?: run {
+            val created = runManager.createConfiguration(target.configurationName, type.configurationFactories.first())
+            val php = (created.configuration as PhpScriptRunConfiguration).settings
+            php.setPath("$base/${target.entry}")
+            php.setScriptParameters(target.command.name)
+            php.workingDirectory = "$base/${target.workingDirectory}".trimEnd('/')
+            runManager.setTemporaryConfiguration(created)
+            created
+        }
         val php = (settings.configuration as PhpScriptRunConfiguration).settings
-        php.setPath("$base/${target.entry}")
-        php.setScriptParameters(target.command.name)
-        php.workingDirectory = "$base/${target.workingDirectory}".trimEnd('/')
-        runManager.setTemporaryConfiguration(settings)
-        return settings
+        return object : CommandLaunchConfiguration {
+            override val settings: RunnerAndConfigurationSettings = settings
+            override var arguments: String
+                get() = php.scriptParameters.orEmpty()
+                set(value) { php.setScriptParameters(value) }
+        }
     }
 }

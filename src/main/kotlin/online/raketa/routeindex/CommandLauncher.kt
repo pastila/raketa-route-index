@@ -11,13 +11,19 @@ import com.intellij.openapi.project.Project
  */
 interface CommandLauncher {
     /** An existing configuration named [CommandRunTarget.configurationName] or a new temporary one; null to defer. */
-    fun configuration(project: Project, target: CommandRunTarget): RunnerAndConfigurationSettings?
+    fun configuration(project: Project, target: CommandRunTarget): CommandLaunchConfiguration?
 
     companion object {
         private val EP_NAME = ExtensionPointName<CommandLauncher>("online.raketa.routeindex.commandLauncher")
 
-        fun configuration(project: Project, target: CommandRunTarget): RunnerAndConfigurationSettings? =
+        fun configuration(project: Project, target: CommandRunTarget): CommandLaunchConfiguration? =
             EP_NAME.extensionList.firstNotNullOfOrNull { it.configuration(project, target) }
                 ?: ConsoleCommandConfigurationType.configuration(project, target)
     }
+}
+
+/** Script parameters exposed without depending on the optional JetBrains PHP plugin. */
+interface CommandLaunchConfiguration {
+    val settings: RunnerAndConfigurationSettings
+    var arguments: String
 }
