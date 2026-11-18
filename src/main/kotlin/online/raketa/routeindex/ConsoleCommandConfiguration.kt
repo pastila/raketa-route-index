@@ -40,7 +40,7 @@ import javax.swing.JComponent
 private const val DEBUG_EXECUTOR_ID = "Debug"
 
 /**
- * A console command run with `docker exec` in the php container — the ▶ of IDEs without PhpStorm's PHP plugin.
+ * A console command run with `docker exec` when no PHP Script launcher is available.
  * Debug only asks Xdebug for a session (`XDEBUG_SESSION`); the PHP plugin of the IDE accepts it when it listens.
  */
 class ConsoleCommandConfigurationType : SimpleConfigurationType(
@@ -55,6 +55,12 @@ class ConsoleCommandConfigurationType : SimpleConfigurationType(
     override fun getOptionsClass(): Class<out BaseState> = ConsoleCommandOptions::class.java
 
     companion object {
+        fun savedArguments(project: Project, target: CommandRunTarget): String? {
+            val type = ConfigurationTypeUtil.findConfigurationType(ConsoleCommandConfigurationType::class.java)
+            val settings = RunManager.getInstance(project).findConfigurationByTypeAndName(type, target.configurationName)
+            return (settings?.configuration as? ConsoleCommandConfiguration)?.options?.arguments
+        }
+
         fun configuration(project: Project, target: CommandRunTarget): CommandLaunchConfiguration {
             val runManager = RunManager.getInstance(project)
             val type = ConfigurationTypeUtil.findConfigurationType(ConsoleCommandConfigurationType::class.java)
@@ -165,7 +171,7 @@ private class ConsoleCommandSettingsEditor : SettingsEditor<ConsoleCommandConfig
     override fun createEditor(): JComponent = panel {
         row("Контейнер:") { cell(container).align(AlignX.FILL).comment("docker exec &lt;контейнер&gt;") }
         row("Консоль:") { cell(entry).align(AlignX.FILL).comment("Путь от корня проекта: app/raketa/bin/console") }
-        row("Рабочий каталог:") { cell(workingDirectory).align(AlignX.FILL).comment("От корня проекта: core") }
+        row("Рабочий каталог:") { cell(workingDirectory).align(AlignX.FILL).comment("От корня проекта: app/raketa") }
         row("Аргументы:") { cell(arguments).align(AlignX.FILL) }
     }
 

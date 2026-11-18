@@ -12,10 +12,10 @@ class CommandMatcherTest {
     private fun command(
         name: String,
         handler: String,
-        entries: List<String> = listOf("core/bin/console", "app/raketa/api/bin/console"),
+        entries: List<String> = listOf("app/raketa/bin/console"),
         description: String = "",
         aliases: List<String> = emptyList(),
-    ) = ConsoleCommand(name, aliases, description, false, handler, "x.php", 1, listOf("core"), entries)
+    ) = ConsoleCommand(name, aliases, description, false, handler, "x.php", 1, listOf("raketa"), entries)
 
     private val commands = listOf(
         command("bus:translate-stations", "TranslateBusStationsCommand::execute", description = "Переводит автобусные станции на несколько языков"),
@@ -38,7 +38,7 @@ class CommandMatcherTest {
 
     @Test
     fun `pasted command line`() {
-        assertEquals("TranslateBusStationsCommand::execute", best("php core/bin/console bus:translate-stations --dry-run"))
+        assertEquals("TranslateBusStationsCommand::execute", best("php app/raketa/bin/console bus:translate-stations --dry-run"))
         assertEquals("QueueListenCommand::execute", best("php api/bus/cli/run message-broker-queue-listen"))
         assertEquals("QueueListenCommand::execute", best("mb:listen"))
     }
@@ -82,7 +82,7 @@ class CommandMatcherTest {
             assertTrue("$q →\n$dump", found.firstOrNull()?.command?.handler?.endsWith(handlerSuffix) == true)
         }
         assertTop("bus:translate-stations", "TranslateBusStationsCommand::execute")
-        assertTop("php core/bin/console order:process", "ProcessOrderCommand::execute")
+        assertTop("php app/raketa/bin/console order:process", "ProcessOrderCommand::execute")
         assertTop("php api/hotels/cli/ostrovok sync:api:service", "Ostrovok\\v3\\Tool\\SyncApiServiceCommand::execute")
         assertTop("php api/bus/cli/run message-broker-queue-listen", "::execute")
         assertTrue("every command but maker-bundle has a class", all.none { it.handler == null && !it.name.startsWith("make:") })

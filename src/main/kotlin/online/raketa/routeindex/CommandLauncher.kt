@@ -6,9 +6,8 @@ import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
 
 /**
- * Creates the run configuration behind a gutter ▶ of a console command. PhpStorm registers the PHP Script one
- * (`php-run.xml`, loaded only with `com.jetbrains.php`); other IDEs, such as Raketa with the OpenIDE PHP plugin,
- * fall back to [ConsoleCommandConfigurationType], which runs the console with `docker exec`.
+ * Creates the run configuration behind a gutter ▶ of a console command. PhpStorm and Raketa PHP each register
+ * a PHP Script launcher. [ConsoleCommandConfigurationType] runs the console with `docker exec` as a fallback.
  */
 interface CommandLauncher {
     /** An existing configuration named [CommandRunTarget.configurationName] or a new temporary one; null to defer. */
@@ -30,7 +29,7 @@ interface CommandLauncher {
     }
 }
 
-/** Script parameters exposed without depending on the optional JetBrains PHP plugin. */
+/** Script parameters shared by the command launchers. */
 interface CommandLaunchConfiguration {
     val settings: RunnerAndConfigurationSettings
     var arguments: String

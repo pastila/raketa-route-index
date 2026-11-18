@@ -8,7 +8,7 @@ import org.junit.Test
 import java.io.File
 import java.net.URLClassLoader
 
-class SpxCommandOptionsTest {
+class PhpScriptOptionsTest {
     private fun target(entry: String) = CommandRunTarget(
         ConsoleCommand("sync:api:service", emptyList(), "", false, null, null, 1, emptyList(), listOf(entry)),
         entry,
@@ -25,11 +25,11 @@ class SpxCommandOptionsTest {
             .addContent(option("php", "/usr/bin/php8.5"))
             .addContent(option("phpOptions", "-d memory_limit=1G"))
         val arguments = "sync:api:service 123 --name=\"two words\" --filter='a & b'"
-        SpxCommandOptions(state).initialize(target("api/hotels/cli/sabre"), arguments)
+        PhpScriptOptions(state).initialize(target("api/hotels/cli/sabre"), arguments)
 
         assertEquals("api/hotels/cli/sabre", value(state, "scriptPath"))
         assertEquals("api/hotels", value(state, "workingDirectory"))
-        assertEquals(arguments, SpxCommandOptions(state).arguments)
+        assertEquals(arguments, PhpScriptOptions(state).arguments)
         assertEquals("/usr/bin/php8.5", value(state, "php"))
         assertEquals("-d memory_limit=1G", value(state, "phpOptions"))
     }
@@ -45,7 +45,7 @@ class SpxCommandOptionsTest {
             .addContent(option("arguments", "sync:api:service --old"))
             .addContent(environment)
             .addContent(beforeRun)
-        SpxCommandOptions(state).arguments = "sync:api:service --new"
+        PhpScriptOptions(state).arguments = "sync:api:service --new"
 
         assertEquals("sync:api:service --new", value(state, "arguments"))
         assertEquals("/custom/console", value(state, "scriptPath"))
@@ -57,20 +57,36 @@ class SpxCommandOptionsTest {
     @Test
     fun `console at project root gets an explicit working directory`() {
         val state = Element("configuration")
-        SpxCommandOptions(state).initialize(target("console"), "sync:api:service")
+        PhpScriptOptions(state).initialize(target("console"), "sync:api:service")
         assertEquals(".", value(state, "workingDirectory"))
     }
 
     /** Optional compatibility check against a built SPX plugin: `-PraketaSpxPlugin=/path/to/raketa-php-spx.jar`. */
     @Test
     fun `SPX plugin reads and writes our options`() {
-        val path = System.getProperty("raketa.spxPlugin")
+        val state = Element("configuration").addContent(option("phpOptions", "-d memory_limit=1G"))
+        pluginReadsAndWritesOptions("raketa.spxPlugin", "ru.raketa.php.spx.script.SpxPhpScriptOptions", state) { edited ->
+            assertEquals("-d memory_limit=1G", edited.javaClass.getMethod("getPhpOptions").invoke(edited))
+        }
+    }
+
+    @Test
+    fun `Raketa PHP plugin reads and writes our options`() {
+        pluginReadsAndWritesOptions("raketa.phpPlugin", "ru.raketa.php.script.PhpScriptOptions")
+    }
+
+    private fun pluginReadsAndWritesOptions(
+        property: String,
+        className: String,
+        state: Element = Element("configuration"),
+        checkOptions: (Any) -> Unit = {},
+    ) {
+        val path = System.getProperty(property)
         assumeTrue(path != null && File(path).isFile)
         URLClassLoader(arrayOf(File(path!!).toURI().toURL()), javaClass.classLoader).use { loader ->
-            val type = loader.loadClass("ru.raketa.php.spx.script.SpxPhpScriptOptions")
-            val state = Element("configuration").addContent(option("phpOptions", "-d memory_limit=1G"))
+            val type = loader.loadClass(className)
             val arguments = "sync:api:service --name=\"two words\""
-            SpxCommandOptions(state).initialize(target("api/hotels/cli/sabre"), arguments)
+            PhpScriptOptions(state).initialize(target("api/hotels/cli/sabre"), arguments)
 
             val native = XmlSerializer.deserialize(state, type)
             assertEquals("api/hotels/cli/sabre", type.getMethod("getScriptPath").invoke(native))
@@ -78,11 +94,13 @@ class SpxCommandOptionsTest {
             assertEquals(arguments, type.getMethod("getArguments").invoke(native))
 
             val saved = XmlSerializer.serialize(native)
-            assertEquals(arguments, SpxCommandOptions(saved).arguments)
-            SpxCommandOptions(saved).arguments = "sync:api:service --id=1"
+            assertEquals(arguments, PhpScriptOptions(saved).arguments)
+            PhpScriptOptions(saved).arguments = "sync:api:service --id=1"
             val edited = XmlSerializer.deserialize(saved, type)
             assertEquals("sync:api:service --id=1", type.getMethod("getArguments").invoke(edited))
-            assertEquals("-d memory_limit=1G", type.getMethod("getPhpOptions").invoke(edited))
+            assertEquals("api/hotels/cli/sabre", type.getMethod("getScriptPath").invoke(edited))
+            assertEquals("api/hotels", type.getMethod("getWorkingDirectory").invoke(edited))
+            checkOptions(edited)
         }
     }
 }

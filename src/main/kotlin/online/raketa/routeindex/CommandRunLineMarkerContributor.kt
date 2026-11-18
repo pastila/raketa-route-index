@@ -17,8 +17,8 @@ import com.intellij.psi.util.PsiTreeUtil
 /**
  * ▶ on `execute()`/`__invoke()` of every console command in the index, with Run and Debug through each
  * console that serves it — scripts of `api/<service>/cli` included, which the Symfony plugin's marker doesn't know.
- * The configuration comes from [CommandLauncher]: PHP Script in PhpStorm, `docker exec` elsewhere. An existing
- * configuration of the same name is reused as is, with whatever arguments were added to it.
+ * The configuration comes from [CommandLauncher]. An existing configuration of the same name is reused
+ * with its saved arguments.
  */
 class CommandRunLineMarkerContributor : RunLineMarkerContributor(), DumbAware {
     override fun getInfo(element: PsiElement): Info? {

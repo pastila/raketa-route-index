@@ -7,8 +7,8 @@ class ConsoleCommandLineTest {
     @Test
     fun `run turns xdebug off`() {
         assertEquals(
-            listOf("docker", "exec", "-w", "/web/core", "raketa-php", "php", "-d", "xdebug.mode=off", "/web/core/bin/console", "bus:listen", "--id=1"),
-            ConsoleCommandLine.docker("raketa-php", "/web", "core/bin/console", "core", listOf("bus:listen", "--id=1"), debug = false),
+            listOf("docker", "exec", "-w", "/web/app/raketa", "raketa-php", "php", "-d", "xdebug.mode=off", "/web/app/raketa/bin/console", "bus:listen", "--id=1"),
+            ConsoleCommandLine.docker("raketa-php", "/web", "app/raketa/bin/console", "app/raketa", listOf("bus:listen", "--id=1"), debug = false),
         )
     }
 

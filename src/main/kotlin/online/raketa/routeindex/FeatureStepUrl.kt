@@ -45,7 +45,7 @@ object FeatureStepUrl {
         "static" to "static",
     )
 
-    /** Stub service names — core/src/Behat/TestGenerator/HostToServiceNameMapFactory.php plus aliases in use. */
+    /** Stub service names — app/raketa/raketa/Infrastructure/Behat/TestGenerator/HostToServiceNameMapFactory.php plus aliases in use. */
     private val STUB_APPS = mapOf(
         "авиа" to "avia",
         "жд" to "rail",
@@ -116,13 +116,13 @@ object FeatureStepUrl {
         return null
     }
 
-    /** `Static АПИ` in core means app/static scripts, in api/static — the static service. */
+    /** `Static АПИ` in app/raketa means app/static scripts, in api/static — the static service. */
     private fun fixStatic(app: String?, filePath: String): String {
         val byPath = pathApp(filePath)
         return if (app == null || (app == "static" && byPath == "static-api")) byPath else app
     }
 
-    /** `api/<service>/features`, `app/raketa/api/<service>/features` → that service; everything in core runs against raketa. */
+    /** `api/<service>/features`, `app/raketa/api/<service>/features` → that service; other app/raketa features run against raketa. */
     fun pathApp(filePath: String): String {
         val dir = API_DIR.find(filePath.replace('\\', '/'))?.groupValues?.get(1) ?: return "raketa"
         return if (dir == "static") "static-api" else dir

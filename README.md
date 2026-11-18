@@ -13,11 +13,12 @@
 
 ## ▶ у консольных команд
 
-На `execute()`/`__invoke()` каждой команды из индекса в гутере появляется ▶: **Run** и **Debug** через
-каждую консоль, которая её обслуживает (`app/raketa/bin/console`, `app/fcc/cli/fcc`,
-`api/hotels/cli/sabre`, …). Запуск — временная конфигурация **PHP Script** на интерпретаторе проекта
-по умолчанию (`php (Docker)`), рабочий каталог — корень приложения консоли (`core`, `api/hotels`),
-так что Debug сам включает прослушивание Xdebug. Конфигурация с тем же именем (`<команда>` или
+На `execute()`/`__invoke()` каждой команды из индекса в гутере появляется ▶ с **Run** и **Debug** для
+каждой консоли, которая её обслуживает (`app/raketa/bin/console`, `app/fcc/cli/fcc`,
+`api/hotels/cli/sabre`, …). PhpStorm создаёт временную конфигурацию **PHP Script**, а Raketa PHP
+(`ru.raketa.php`) — **PHP Script (Raketa)**. Обе используют интерпретатор проекта и рабочий каталог
+приложения (`app/raketa`, `api/hotels`). В режиме Debug IDE сама открывает сессию Xdebug.
+Конфигурация с тем же именем (`<команда>` или
 `<команда> (<консоль>)`, если консолей несколько) переиспользуется как есть — сохраните её
 (Save Configuration) и допишите аргументы (`--id=1`), они останутся. Метод ищется по имени, а не по
 строке из дампа, поэтому значок не съезжает при правке файла; новая команда получает ▶ после
@@ -36,15 +37,16 @@
 берутся из индекса, аргументы при первом создании — из обычной конфигурации команды. Дальше параметры
 SPX-конфигурации сохраняются отдельно. Настройки профилирования, проверка наличия PHP-расширения SPX
 и открытие отчёта — штатные возможности SPX Profiler.
-Интерпретатор задаётся средствами SPX: с PHP for OpenIDE используется интерпретатор проекта (в том числе
-Docker), без него — `php` из `PATH` или исполняемый файл PHP, указанный в SPX-конфигурации.
+Интерпретатор задаётся средствами SPX. Подходящая сборка SPX использует интерпретатор проекта
+из Raketa PHP или PHP for OpenIDE. В SPX-конфигурации также можно указать исполняемый файл PHP.
 
-Без PHP-плагина JetBrains (Raketa с PHP for OpenIDE) ▶ создаёт конфигурацию **Raketa Console Command**:
+Если **PHP Script** недоступен (например, с PHP for OpenIDE), ▶ создаёт **Raketa Console Command**:
 `docker exec -w /web/<приложение> raketa-php php /web/<консоль> <команда>`. Run выключает Xdebug
 (`-d xdebug.mode=off`), Debug передаёт `XDEBUG_SESSION=1` и `XDEBUG_MODE=debug`. Соединение принимает
 PHP-плагин IDE, если он слушает Xdebug и в нём задано сопоставление проекта с `/web`. Контейнер тот же, что у
 пересборки индекса (`-Draketa.routes.container`, `RAKETA_PHP_CONTAINER`), путь проекта в контейнере —
-`-Draketa.routes.containerRoot` (по умолчанию `/web`).
+`-Draketa.routes.containerRoot` (по умолчанию `/web`). При первом запуске через **PHP Script (Raketa)**
+аргументы копируются из одноимённой **Raketa Console Command**, если она есть.
 
 ## Маршрут у контроллера
 
@@ -82,7 +84,7 @@ action Symfony-контроллера) в гутере стоит значок, 
 
 - `клиент делает [multipart/form-data ]POST запрос на /v1/...` — приложение берётся из ближайшего
   следующего шага `<App> АПИ возвращает http-статус N` в сценарии (`Raketa`, `Авиа`, `Api hotel`,
-  `Mobile`…), иначе по пути файла (`api/<service>/features` → сервис, `core` → raketa);
+  `Mobile`…), иначе по пути файла (`api/<service>/features` → сервис, `app/raketa` → raketa);
 - `АПИ Авиа на curl-запрос GET /admin/...` — заглушка нашего сервиса, приложение по имени
   (`HostToServiceNameMapFactory`); внешние поставщики (`Поставщик АПИ …`, `avia.supplier.ru`) не ссылки;
 - `Функциональность: GET /api/...` — приложение из первого шага ответа файла;
@@ -113,7 +115,7 @@ id и хост `<id>.raketa.in` — из `server_name ~^<id>(...)`, катало
 Symfony или Slim — по тому, что нашлось внутри результата (`RaketaHttpApp` → `SymfonyToPsrAdapter` →
 `Kernel`): Symfony отдаёт `router`, Slim — `RouteCollector` (замыкания `api/profile` разворачиваются в
 `...Operation::class`); у приложений не на core — ещё `GET /health` из middleware. Объявления маршрутов
-ищутся в `config/` Symfony-приложения (у приложений на core — ещё в `core/config`), у Slim — во всём каталоге.
+ищутся в `config/` Symfony-приложения (у приложений на core — ещё в `app/raketa/config`), у Slim — во всём каталоге.
 
 Что из nginx не следует — в `RR_APP_OVERRIDES` по id: `raketa` — хосты `raketa.in` и `master.*`,
 `static` — id `static-api` (`static` занят `/static/`), `fcc` и `planeta` — файловые
@@ -153,8 +155,9 @@ export JAVA_HOME=~/.local/share/JetBrains/Toolbox/apps/phpstorm/jbr
 ./gradlew buildPlugin          # build/distributions/raketa-route-index-*.zip → Settings → Plugins → ⚙ → Install from Disk
 ./gradlew test -PraketaRoutes=../raketa/.idea/raketa-routes.json   # + smoke-тест на реальном дампе
 ./gradlew test -PraketaSpxPlugin=../raketa-storm/out/raketa/dist.all/plugins/raketa-php-spx/lib/raketa-php-spx.jar  # совместимость настроек SPX
+./gradlew test -PraketaPhpPlugin=/path/to/compiled/php.jar  # совместимость настроек PHP Script (Raketa)
 ```
 
 Собирается против локально установленного PhpStorm (`localIdePath` в `gradle.properties`), IDE не скачивается.
-Зависимость от PHP-плагина JetBrains необязательная (`php-run.xml`), поэтому тот же zip ставится и в Raketa;
-значки в гутере работают с любым PHP-плагином, объявляющим язык `PHP`.
+Обе зависимости для запуска скриптов необязательны. Один ZIP устанавливается в PhpStorm и Raketa.
+Значки в гутере работают с любым PHP-плагином, объявляющим язык `PHP`.

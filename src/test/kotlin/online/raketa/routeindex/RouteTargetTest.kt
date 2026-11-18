@@ -11,7 +11,7 @@ class RouteTargetTest {
     private fun route(app: String, hosts: List<String>, method: String, path: String, handler: String, file: String) =
         Route(app, hosts, listOf(method), path, emptyMap(), handler, file, 10, null)
 
-    private val chatFile = "api/mobile/src/Presentation/Operation/Chat/PostMessageForServiceHandler.php"
+    private val chatFile = "app/raketa/api/mobile/src/Presentation/Operation/Chat/PostMessageForServiceHandler.php"
     private val chat = route("mobile", listOf("mobile.raketa.in"), "POST", "/v3/chat/service/{serviceId:[0-9]+}",
         "Mobile\\Presentation\\Operation\\Chat\\PostMessageForServiceHandler::__invoke", chatFile)
     private val remarksFile = "app/raketa/api/src/Controller/RemarkController.php"
@@ -66,7 +66,7 @@ class RouteTargetTest {
         val chatUsages = FeatureUsages.inFile(compiled, listOf(chat), "api/mobile/features/a.feature", feature)
         assertEquals(listOf(3), chatUsages.map { it.line })
         assertTrue(chatUsages.single().text.startsWith("Когда клиент делает POST"))
-        assertEquals(listOf(8), FeatureUsages.inFile(compiled, listOf(remarksAdd), "core/src/Features/a.feature", feature).map { it.line })
+        assertEquals(listOf(8), FeatureUsages.inFile(compiled, listOf(remarksAdd), "app/raketa/features/a.feature", feature).map { it.line })
         assertTrue(FeatureUsages.inFile(compiled, listOf(chat), "a.feature", "Когда клиент делает GET запрос на /v2/other").isEmpty())
     }
 
@@ -84,7 +84,7 @@ class RouteTargetTest {
         val declared = methods.count { it.declarationFile != null }
         assumeTrue("dump without declarations", declared > 0)
         assertTrue("declared $declared of ${methods.size}", declared > methods.size * 0.99)
-        assertEquals("api/mobile/src/RoutingBuilder.php", chatRoutes.single().declarationFile)
+        assertEquals("app/raketa/api/mobile/src/RoutingBuilder.php", chatRoutes.single().declarationFile)
         val repo = File(path).parentFile.parentFile
         val line = File(repo, chatRoutes.single().declarationFile!!).readLines()[chatRoutes.single().declarationLine - 1]
         assertTrue(line, line.contains("'/chat/service/{serviceId:[0-9]+}'") && line.contains("PostMessageForServiceHandler::class"))

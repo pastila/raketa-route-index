@@ -77,10 +77,10 @@ foreach (rr_finish($procs) as $id => [$stdout, $stderr]) {
         $routes[] = $r;
     }
     $apps_stats[$id] = count($result['routes']);
-    // Symfony keeps its routing in config/ (attribute controllers of core — in core/config), Slim builds it anywhere in the app.
+    // Symfony keeps its routing in config/ (shared attribute controllers — in app/raketa/config), Slim builds it anywhere in the app.
     $dir = $apps[$id]['dir'];
     $declarationRoots[$id] = $result['kind'] === 'symfony'
-        ? array_merge(["$dir/config"], $apps[$id]['boot']['core'] ? ['core/config'] : [])
+        ? array_merge(["$dir/config"], $apps[$id]['boot']['core'] ? ['app/raketa/config'] : [])
         : [$dir];
 }
 
@@ -106,8 +106,8 @@ foreach (rr_finish($procs) as $entry => [$stdout, $stderr]) {
         $entries_stats[$entry] = 0;
         continue;
     }
-    // core and raketa consoles share their commands, profile-sync and hotels repeat theirs in
-    // every cli script: one record per command, with every entry point that runs it.
+    // Profile-sync and hotels repeat their commands in every cli script:
+    // one record per command, with every entry point that runs it.
     foreach ($entryCommands as $c) {
         $key = $c['name'] . '|' . $c['handler'];
         $commands[$key] ??= ['apps' => [], 'entries' => []] + $c;
@@ -514,7 +514,7 @@ function rr_index_boot(string $public): ?array
         'factory' => rr_index_class($factory, $source),
         'method' => $method,
         'sentry' => $sentry,
-        'core' => in_array(RR_WEB . '/core/vendor/autoload.php', $requires, true),
+        'core' => in_array(RR_WEB . '/app/raketa/vendor/autoload.php', $requires, true),
     ];
 }
 
@@ -535,7 +535,7 @@ function rr_index_class(string $name, string $source): string
     return $ns . $name;
 }
 
-/** `/web/app/raketa/api/raketa/public/../../../../../core/x` → `/web/core/x` without touching the disk. */
+/** `/web/app/raketa/api/raketa/public/../../../../../app/raketa/x` → `/web/app/raketa/x` without touching the disk. */
 function rr_normalize(string $path): string
 {
     $parts = [];

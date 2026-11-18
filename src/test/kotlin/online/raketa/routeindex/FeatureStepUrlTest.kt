@@ -26,7 +26,7 @@ class FeatureStepUrlTest {
             Когда клиент делает GET запрос на /v1/service/1
     """.trimIndent().lines()
 
-    private fun at(lineIndex: Int, text: String, path: String = "core/src/Features/x/feature.feature"): FeatureStepUrl.Hit? {
+    private fun at(lineIndex: Int, text: String, path: String = "app/raketa/features/x/feature.feature"): FeatureStepUrl.Hit? {
         val column = feature[lineIndex].indexOf(text) + 1
         return FeatureStepUrl.find(feature, lineIndex, column, path)
     }
@@ -47,6 +47,8 @@ class FeatureStepUrlTest {
         assertEquals("raketa", at(13, "/v1/service")!!.app)
         assertEquals("avia", at(13, "/v1/service", "api/avia/features/Service/Get/feature.feature")!!.app)
         assertEquals("static-api", FeatureStepUrl.pathApp("api/static/features/a.feature"))
+        assertEquals("mobile", FeatureStepUrl.pathApp("app/raketa/api/mobile/features/a.feature"))
+        assertEquals("raketa", FeatureStepUrl.pathApp("app/raketa/raketa/BoundedContext/Order/Features/a.feature"))
     }
 
     @Test
@@ -84,8 +86,8 @@ class FeatureStepUrlTest {
 
         val stats = sortedMapOf<String, IntArray>()
         val misses = mutableListOf<String>()
-        val features = sequenceOf("core/src", "api").map { File(repo, it) }
-            .flatMap { dir -> dir.walkTopDown().onEnter { it.name != "vendor" && it.name != "Generated" } }
+        val features = sequenceOf("app/raketa", "api").map { File(repo, it) }
+            .flatMap { dir -> dir.walkTopDown().onEnter { it.name !in setOf("vendor", "node_modules", "frontend", "Generated") } }
             .filter { it.isFile && it.extension == "feature" }
         for (file in features) {
             val rel = file.relativeTo(repo).path
