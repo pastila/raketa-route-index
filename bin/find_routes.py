@@ -9,6 +9,7 @@ METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 HOST = re.compile(r"^[\w-]+(\.[\w-]+)*\.(in|online|ru|com|cnt|consul|local)(:\d+)?$", re.I)
 REST = re.compile(r"^\{(\w+)(?::(.*))?}$")
 LANG = re.compile(r"^(ru|en)$", re.I)
+QUERY_PARAMETER = re.compile(r"\{\w+}", re.ASCII)
 
 
 def compile_segment(seg, req):
@@ -42,7 +43,7 @@ class Compiled:
         self.r = r
         req = r.get("requirements") or {}
         req = req if isinstance(req, dict) else {}
-        raw = [s for s in r["path"].split("/") if s]
+        self.raw = raw = [s for s in r["path"].split("/") if s]
         self.rest = None
         m = REST.match(raw[-1]) if raw else None
         if m:
@@ -55,6 +56,11 @@ class Compiled:
         self.segs = [compile_segment(s, req) for s in (raw[:-1] if self.rest else raw)]
         self.literals = sum("{" not in s for s in raw)
         self.text = " ".join(filter(None, [r["path"], r["handler"], r.get("name"), r["app"]])).lower()
+
+    def matches_segment(self, index, query):
+        return self.segs[index].fullmatch(query) is not None or (
+            "{" in self.raw[index] and QUERY_PARAMETER.fullmatch(query) is not None
+        )
 
 
 def parse(raw):
@@ -94,17 +100,17 @@ def seg_match(c, qs, host, method):
         return None
     rs = c.segs
     if c.rest:
-        if len(qs) <= len(rs) or not all(rs[i].fullmatch(qs[i]) for i in range(len(rs))):
+        if len(qs) <= len(rs) or not all(c.matches_segment(i, qs[i]) for i in range(len(rs))):
             return None
         if not c.rest.fullmatch("/".join(qs[len(rs):])):
             return None
         return 500 + c.literals * 5 + bonus(c.r, host, method)
-    if len(qs) == len(rs) - 1 and rs[-1].fullmatch(""):
-        rs = rs[:-1]
-    if len(qs) > len(rs):
-        return None
     off = len(rs) - len(qs)
-    if not all(rs[off + i].fullmatch(q) for i, q in enumerate(qs)):
+    if off < 0:
+        return None
+    if off == 1 and rs[-1].fullmatch("") and all(c.matches_segment(i, q) for i, q in enumerate(qs)):
+        off = 0
+    elif not all(c.matches_segment(off + i, q) for i, q in enumerate(qs)):
         return None
     return (1000 if off == 0 else 700 - off * 10) + c.literals * 5 + bonus(c.r, host, method)
 

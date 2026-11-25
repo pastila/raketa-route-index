@@ -27,7 +27,7 @@ class RouteMatcherTest {
         route("/{path}", "IndexController::index", requirements = mapOf("path" to "(?!api/).*")),
         route("/directory/client/", "app/fcc/public/directory/client/index.php", app = "fcc", methods = emptyList(), hosts = listOf("fcc.raketa.in")),
         route("/static/photo/ac/{rest:.+}", "photo/acase.php", app = "static"),
-        route("/api/{entityType}/{entityId}/logs/{child}", "GetLogsController::get", requirements = mapOf("entityId" to "\\d+", "child" to "(budget|lso)?")),
+        route("/api/{entityType}/{entityId}/logs/{child}", "GetLogsController::get", requirements = mapOf("entityType" to "\\w+", "entityId" to "\\d+", "child" to "(budget|lso|clientContracts)?")),
     )
 
     private fun search(q: String): List<RouteMatch> {
@@ -58,6 +58,20 @@ class RouteMatcherTest {
     fun `requirements reject non matching values`() {
         assertTrue(search("/api/profiles/abc/remarks").none { it.route.route.handler.startsWith("RemarkController") })
         assertEquals("TravellersController::search", best("/api/profiles/travellers"))
+    }
+
+    @Test
+    fun `query placeholders match route parameters with different names and requirements`() {
+        val full = search("GET /api/agency/{clientId}/logs/clientContracts").first()
+        assertEquals("GetLogsController::get", full.route.route.handler)
+        assertEquals(RouteMatch.Kind.URL, full.kind)
+        val suffix = search("agency/{clientId}/logs/clientContracts").first()
+        assertEquals("GetLogsController::get", suffix.route.route.handler)
+        assertEquals(RouteMatch.Kind.URL_SUFFIX, suffix.kind)
+        assertEquals("ServiceV2Controller::getById", best("/v2/services/{id}"))
+        assertTrue(search("/api/agency/abc/logs/clientContracts").none { it.route.route.handler == "GetLogsController::get" })
+        assertTrue(search("/api/agency/{clientId}/logs/unknown").none { it.route.route.handler == "GetLogsController::get" })
+        assertTrue(search("/api/agency/{clientId}/{section}/clientContracts").none { it.route.route.handler == "GetLogsController::get" })
     }
 
     @Test
@@ -110,6 +124,8 @@ class RouteMatcherTest {
         }
         assertTop("https://raketa.in/api/profiles/645701/remarks", "RemarkController::get")
         assertTop("POST api/profiles/645701/remarks", "RemarkController::post")
+        assertTop("GET /api/agency/{clientId}/logs/clientContracts", "GetLogsController::get")
+        assertTop("GET /api/agency/3156/logs/clientContracts", "GetLogsController::get")
         assertTop("https://avia.raketa.in/v1/schedule/12", "GetFlightScheduleByContractController::__invoke")
         assertTop("https://profile.raketa.in/v1/profile/5/remarks", "RemarksGetOperation::handle")
         assertTop("https://fcc.raketa.in/ru/directory/api-profile-sync/profile-remarks/sabre/edit.php?id=1", "sabre/edit.php")

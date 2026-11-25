@@ -20,8 +20,14 @@ class CompiledRoute(val route: Route) {
         .joinToString(" ")
         .lowercase()
 
+    /** A whole `{name}` in the query stands for an unknown value of a route parameter. */
+    fun matchesSegment(index: Int, query: String): Boolean =
+        query == RouteQuery.ANY_SEGMENT || segments[index].matches(query) ||
+            ('{' in rawSegments[index] && QUERY_PARAMETER.matches(query))
+
     companion object {
         private val REST = Regex("""^\{(\w+)(?::(.*))?}$""")
+        private val QUERY_PARAMETER = Regex("""\{\w+}""")
 
         fun splitPath(path: String): List<String> = path.split('/').filter { it.isNotEmpty() }
 
@@ -131,13 +137,14 @@ object RouteMatcher {
     private fun segmentsMatch(route: CompiledRoute, query: RouteQuery, qs: List<String>): RouteMatch? {
         if (qs.isEmpty()) return null
         route.restTail?.let { return restMatch(route, query, qs, it) }
-        var rs = route.segments
-        // A last placeholder that accepts "" (`{child}` with `(a|b)?`) is optional: `/x/1/logs/`
-        if (qs.size == rs.size - 1 && rs.last().matches("")) rs = rs.dropLast(1)
-        if (qs.size > rs.size) return null
-        val offset = rs.size - qs.size
-        for (i in qs.indices) {
-            if (!segmentMatches(rs[offset + i], qs[i])) return null
+        val suffixOffset = route.segments.size - qs.size
+        if (suffixOffset < 0) return null
+        // Try a full path with the optional last segment omitted before a suffix match.
+        val offset = when {
+            suffixOffset == 1 && route.segments.last().matches("") &&
+                qs.indices.all { route.matchesSegment(it, qs[it]) } -> 0
+            qs.indices.all { route.matchesSegment(suffixOffset + it, qs[it]) } -> suffixOffset
+            else -> return null
         }
         val kind = if (offset == 0) RouteMatch.Kind.URL else RouteMatch.Kind.URL_SUFFIX
         var score = if (offset == 0) 1000 else 700 - offset * 10
@@ -147,14 +154,12 @@ object RouteMatcher {
         return RouteMatch(route, score, kind)
     }
 
-    private fun segmentMatches(route: Regex, query: String) = query == RouteQuery.ANY_SEGMENT || route.matches(query)
-
     /** Catch-all routes match only from the start of the path and lose to any concrete route. */
     private fun restMatch(route: CompiledRoute, query: RouteQuery, qs: List<String>, rest: Regex): RouteMatch? {
         val rs = route.segments
         if (qs.size <= rs.size) return null
         for (i in rs.indices) {
-            if (!segmentMatches(rs[i], qs[i])) return null
+            if (!route.matchesSegment(i, qs[i])) return null
         }
         if (!rest.matches(qs.drop(rs.size).joinToString("/"))) return null
         val score = 500 + route.literalSegments * 5 + hostBonus(route.route, query.host) + methodBonus(route.route, query.method)
