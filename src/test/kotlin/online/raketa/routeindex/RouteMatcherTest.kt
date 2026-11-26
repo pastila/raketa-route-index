@@ -103,6 +103,20 @@ class RouteMatcherTest {
     }
 
     @Test
+    fun `search completes the last literal segment after validated route parameters`() {
+        val logs = routes.single { it.route.handler == "GetLogsController::get" }
+        val query = RouteQuery.parse("GET https://raketa.in/api/agency/2/log")
+        val exact = route("/api/agency/2/log", "LogController::get")
+
+        val match = search("GET https://raketa.in/api/agency/2/log").first()
+        assertEquals(logs, match.route)
+        assertEquals(RouteMatch.Kind.URL_PREFIX, match.kind)
+        assertTrue(RouteMatcher.match(exact, query)!!.score > match.score)
+        assertNull(RouteMatcher.match(logs, RouteQuery.parse("/api/agency/abc/log")))
+        assertTrue(RouteIndex.resolveIn(routes, "raketa", "GET", "/api/agency/2/log").isEmpty())
+    }
+
+    @Test
     fun `plain text searches path and handler`() {
         assertEquals(RouteMatch.Kind.TEXT, search("remarkcontroller").first().kind)
         assertEquals(2, search("RemarkController").size)
@@ -126,6 +140,7 @@ class RouteMatcherTest {
         assertTop("POST api/profiles/645701/remarks", "RemarkController::post")
         assertTop("GET /api/agency/{clientId}/logs/clientContracts", "GetLogsController::get")
         assertTop("GET /api/agency/3156/logs/clientContracts", "GetLogsController::get")
+        assertTop("/api/agency/2/log", "GetLogsController::get")
         assertTop("https://avia.raketa.in/v1/schedule/12", "GetFlightScheduleByContractController::__invoke")
         assertTop("https://profile.raketa.in/v1/profile/5/remarks", "RemarksGetOperation::handle")
         assertTop("https://fcc.raketa.in/ru/directory/api-profile-sync/profile-remarks/sabre/edit.php?id=1", "sabre/edit.php")

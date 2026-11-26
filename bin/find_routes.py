@@ -62,6 +62,18 @@ class Compiled:
             "{" in self.raw[index] and QUERY_PARAMETER.fullmatch(query) is not None
         )
 
+    def matches_path_prefix(self, query):
+        if not 0 < len(query) <= len(self.raw):
+            return False
+        last = len(query) - 1
+        segment, prefix = self.raw[last].lower(), query[last].lower()
+        return (
+            "{" not in segment
+            and len(prefix) < len(segment)
+            and segment.startswith(prefix)
+            and all(self.matches_segment(i, query[i]) for i in range(last))
+        )
+
 
 def parse(raw):
     s, method = raw.strip(), None
@@ -123,6 +135,10 @@ def match(c, method, host, segs, text):
             score = seg_match(c, qs[1:], host, method)
         if score is not None:
             return score
+        if c.matches_path_prefix(segs) or (
+            len(segs) > 1 and LANG.match(segs[0]) and c.matches_path_prefix(segs[1:])
+        ):
+            return 650 + c.literals * 5 + bonus(c.r, host, method)
     tokens = text.lower().split()
     if tokens and all(t in c.text for t in tokens):
         return 300 + (20 if c.r["path"].lower().endswith(tokens[-1]) else 0) + bonus(c.r, None, method)

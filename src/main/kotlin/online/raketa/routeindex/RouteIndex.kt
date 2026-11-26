@@ -90,8 +90,7 @@ class RouteIndex(private val project: Project) {
             val query = RouteQuery.parse(listOfNotNull(method, url).joinToString(" "))
             val matches = routes.asSequence()
                 .filter { app == null || it.route.app == app }
-                .mapNotNull { RouteMatcher.match(it, query) }
-                .filter { it.kind != RouteMatch.Kind.TEXT }
+                .mapNotNull { RouteMatcher.matchUrl(it, query) }
                 .toList()
             val best = matches.maxOfOrNull { it.score } ?: return emptyList()
             return matches.filter { it.score == best }.map { it.route.route }

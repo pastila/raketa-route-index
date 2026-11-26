@@ -22,7 +22,7 @@ data class Route(
 )
 
 data class RouteMatch(val route: CompiledRoute, val score: Int, val kind: Kind) {
-    enum class Kind { URL, URL_SUFFIX, TEXT }
+    enum class Kind { URL, URL_SUFFIX, URL_PREFIX, TEXT }
 }
 
 /**

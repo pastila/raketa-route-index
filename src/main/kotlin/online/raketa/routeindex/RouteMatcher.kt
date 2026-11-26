@@ -25,6 +25,14 @@ class CompiledRoute(val route: Route) {
         query == RouteQuery.ANY_SEGMENT || segments[index].matches(query) ||
             ('{' in rawSegments[index] && QUERY_PARAMETER.matches(query))
 
+    fun matchesPathPrefix(query: List<String>): Boolean {
+        val last = query.lastIndex
+        val segment = rawSegments.getOrNull(last) ?: return false
+        val prefix = query[last]
+        return '{' !in segment && prefix.length < segment.length && segment.startsWith(prefix, ignoreCase = true) &&
+            (0 until last).all { matchesSegment(it, query[it]) }
+    }
+
     companion object {
         private val REST = Regex("""^\{(\w+)(?::(.*))?}$""")
         private val QUERY_PARAMETER = Regex("""\{\w+}""")
@@ -116,14 +124,12 @@ data class RouteQuery(val method: String?, val host: String?, val segments: List
 }
 
 object RouteMatcher {
-    fun match(route: CompiledRoute, query: RouteQuery): RouteMatch? {
-        urlMatch(route, query)?.let { return it }
-        return textMatch(route, query)
-    }
+    fun match(route: CompiledRoute, query: RouteQuery): RouteMatch? =
+        matchUrl(route, query) ?: prefixMatch(route, query) ?: textMatch(route, query)
 
     private val LANG = Regex("^(ru|en)$", RegexOption.IGNORE_CASE)
 
-    private fun urlMatch(route: CompiledRoute, query: RouteQuery): RouteMatch? {
+    fun matchUrl(route: CompiledRoute, query: RouteQuery): RouteMatch? {
         if (!query.looksLikeUrl) return null
         var qs = query.segments
         // `dir/index.php` is served as `dir/` (legacy fcc/planeta)
@@ -132,6 +138,16 @@ object RouteMatcher {
         // fcc/planeta and the SPA accept an optional language prefix: /ru/directory/...
         if (qs.size > 1 && LANG.matches(qs[0])) return segmentsMatch(route, query, qs.drop(1))
         return null
+    }
+
+    private fun prefixMatch(route: CompiledRoute, query: RouteQuery): RouteMatch? {
+        if (!query.looksLikeUrl) return null
+        val segments = query.segments
+        if (!route.matchesPathPrefix(segments) &&
+            !(segments.size > 1 && LANG.matches(segments[0]) && route.matchesPathPrefix(segments.drop(1)))
+        ) return null
+        val score = 650 + route.literalSegments * 5 + hostBonus(route.route, query.host) + methodBonus(route.route, query.method)
+        return RouteMatch(route, score, RouteMatch.Kind.URL_PREFIX)
     }
 
     private fun segmentsMatch(route: CompiledRoute, query: RouteQuery, qs: List<String>): RouteMatch? {
